@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, ScrollView, StyleSheet, Pressable, SafeAreaView } from 'react-native';
 import { Colors } from '../../constants/colors';
 import { AppText } from '../../components/ui/AppText';
@@ -7,6 +7,7 @@ import { LadderRow } from '../../components/vibecheck/LadderRow';
 import { usePersist } from '../../hooks/usePersist';
 import { VibeTabs } from '@/navigation/VibeTabs';
 import SamVibeNav from '@/components/ui/SamVibeNav';
+import { getVibeProfile } from '../../services/vibeCheckApi';
 
 const LADDER = [
   { l: 'Talking', sub: 'Texting, flirting — no dates yet' },
@@ -24,6 +25,17 @@ export const PulseScreen: React.FC = () => {
   const [theirStage] = usePersist<number>('vc.c1.pulse.theirStage', 1);
   const [flagsSheet, setFlagsSheet] = useState(false);
   const [patternsSheet, setPatternsSheet] = useState(false);
+  const [partnerName, setPartnerName] = useState('Partner');
+
+  useEffect(() => {
+    getVibeProfile()
+      .then((profile) => {
+        if (profile?.active_users?.length > 0) {
+          setPartnerName(profile.active_users[0].name || 'Partner');
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const ladderGap = Math.abs(myStage - theirStage);
 
@@ -73,7 +85,7 @@ export const PulseScreen: React.FC = () => {
                 isLast={i === LADDER.length - 1}
                 isMine={i === myStage}
                 isTheirs={i === theirStage}
-                partnerName="Sam"
+                partnerName={partnerName}
                 onPress={() => setMyStage(i)}
               />
             ))}

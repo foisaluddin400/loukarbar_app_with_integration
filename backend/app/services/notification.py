@@ -71,4 +71,74 @@ class NotificationService:
 
         return d
 
+    async def log_presence(self, user_id: str, payload: "PresenceCreate") -> Dict[str, Any]:
+        from bson import ObjectId
+        from app.schemas.notification import NotificationType, NotificationStatus
+        
+        now_utc = datetime.now(timezone.utc)
+        
+        # 1. Update user's last active and location
+        update_data = {"last_active_at": now_utc}
+        if payload.city: update_data["location_city"] = payload.city
+        if payload.latitude: update_data["location_lat"] = payload.latitude
+        if payload.longitude: update_data["location_lon"] = payload.longitude
+        
+        await self.users.update_one(
+            {"_id": ObjectId(user_id)},
+            {"$set": update_data}
+        )
+        
+        # 2. Get user to find partner
+        user = await self.users.find_one({"_id": ObjectId(user_id)})
+        if not user or not user.get("is_aligned"):
+            return {"success": True, "message": "Presence logged. No partner aligned."}
+            
+        partner_id = user.get("partner", {}).get("user_id")
+        if not partner_id:
+            return {"success": True, "message": "Presence logged. Partner ID missing."}
+            
+        # 3. Calculate local hour
+        try:
+            tz = zoneinfo.ZoneInfo(payload.timezone)
+        except Exception:
+            tz = zoneinfo.ZoneInfo("UTC")
+            
+        local_time = now_utc.astimezone(tz)
+        h = local_time.hour
+        
+        if h < 5: phrase = 'still awake'
+        elif h < 12: phrase = 'just waking up'
+        elif h < 17: phrase = 'in the middle of their day'
+        elif h < 21: phrase = 'winding down'
+        else: phrase = 'probably asleep'
+        
+        # 4. Check if we already sent this exact phrase today
+        start_of_day = local_time.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+        
+        existing = await self.notifications_collection.find_one({
+            "sender_id": user_id,
+            "recipient_id": partner_id,
+            "type": NotificationType.PRESENCE.value,
+            "message": phrase,
+            "created_at": {"$gte": start_of_day}
+        })
+        
+        if not existing:
+            new_doc = {
+                "title": "Presence",
+                "message": phrase,
+                "type": NotificationType.PRESENCE.value,
+                "timezone": payload.timezone,
+                "scheduled_for": now_utc,
+                "sender_id": user_id,
+                "recipient_id": partner_id,
+                "status": NotificationStatus.DELIVERED.value, # Delivered immediately
+                "created_at": now_utc,
+                "delivered_at": now_utc
+            }
+            await self.notifications_collection.insert_one(new_doc)
+            return {"success": True, "message": f"Presence logged and notification '{phrase}' sent to partner."}
+            
+        return {"success": True, "message": "Presence logged. Notification skipped (already sent today)."}
+
 notification_service = NotificationService()

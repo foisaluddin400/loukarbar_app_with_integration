@@ -18,7 +18,6 @@ import { Ionicons } from "@expo/vector-icons";
 import { createRelationship, uploadProfilePhoto } from "../services/userApi";
 import { Alert, Image } from "react-native";
 import * as ImagePicker from "expo-image-picker";
-import { Alert } from "react-native";
 
 type Nav = StackNavigationProp<RootStackParamList>;
 

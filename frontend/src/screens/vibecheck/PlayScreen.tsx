@@ -1,111 +1,272 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   ScrollView,
   StyleSheet,
   Pressable,
   SafeAreaView,
+  ActivityIndicator,
+  TouchableOpacity,
 } from "react-native";
 import { Colors } from "../../constants/colors";
 import { AppText } from "../../components/ui/AppText";
 import { AppButton } from "../../components/ui/AppButton";
+import { BottomSheet } from "../../components/ui/BottomSheet";
 import { ThisOrThatCard } from "../../components/vibecheck/ThisOrThatCard";
-import { usePersist } from "../../hooks/usePersist";
 import {
-  PlayHistoryEntry,
-  ThisOrThatCard as TCard,
   VibeTabParamList,
 } from "../../types";
-import { todayIso } from "../../utils/dateUtils";
 import SamVibeNav from "@/components/ui/SamVibeNav";
-import { PulseScreen } from "./PulseScreen";
 import { useNavigation } from "@react-navigation/native";
 import { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
+import {
+  getVibeProfile,
+  getDailyCards,
+  getVibeStreak,
+  submitVibeAnswers,
+  getVibeResults
+} from "../../services/vibeCheckApi";
+import api from "../../services/api";
 
-const TOT_CARDS: TCard[] = [
-  { a: "Beach", b: "Mountains", cat: "Travel" },
-  { a: "Plan everything", b: "Wing it", cat: "Style" },
-  { a: "Text back fast", b: "Take your time", cat: "Comms" },
-  { a: "Stay in", b: "Go out", cat: "Energy" },
-  { a: "Morning person", b: "Night owl", cat: "Rhythm" },
-  { a: "Big group", b: "Just us", cat: "Social" },
-  { a: "Hold hands always", b: "Glance across the room", cat: "Affection" },
-  { a: "Fight it out tonight", b: "Sleep on it first", cat: "Conflict" },
+const DAILY_LIMIT = 12;
+
+const CLOSING_MESSAGES = [
+  "Come back tomorrow. The slowness is the point.",
+  "Good things take time. See you tomorrow.",
+  "Reflect on today's answers. Let them breathe.",
+  "Connection is built in small, daily steps.",
+  "That's enough for now. Rest your mind.",
+  "A little bit every day builds a strong foundation."
 ];
 
-const DAILY_LIMIT = 3;
+// Helper to get a stable message of the day
+const getDailyMessage = () => {
+  const dayOfYear = Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 0).getTime()) / 86400000);
+  return CLOSING_MESSAGES[dayOfYear % CLOSING_MESSAGES.length];
+};
+
+const numberToWord = (num: number) => {
+  const words = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty"];
+  return words[num] || num.toString();
+};
 
 export const PlayScreen: React.FC = () => {
   const navigation = useNavigation<BottomTabNavigationProp<VibeTabParamList>>();
-  const [cardIdx, setCardIdx] = usePersist<number>("vc.c1.play.cardIdx", 0);
-  const [history, setHistory] = usePersist<PlayHistoryEntry[]>(
-    "vc.c1.play.history",
-    [],
-  );
-  const [activeDays, setActiveDays] = usePersist<string[]>(
-    "vc.c1.play.activeDays",
-    [],
-  );
+  
+  const [loading, setLoading] = useState(true);
+  const [dailyCards, setDailyCards] = useState<any[]>([]);
+  const [cardsAnsweredToday, setCardsAnsweredToday] = useState(0);
+  const [streak, setStreak] = useState(0);
+  const [matchRate, setMatchRate] = useState(0);
+  
+  const [activePartners, setActivePartners] = useState<any[]>([]);
+  const [partnerName, setPartnerName] = useState("Partner");
+  const [partnerId, setPartnerId] = useState<string | null>(null);
+  const [myUserId, setMyUserId] = useState<string | null>(null);
+  const [partnerSheet, setPartnerSheet] = useState(false);
+
   const [myPick, setMyPick] = useState<"a" | "b" | null>(null);
   const [theirPick, setTheirPick] = useState<"a" | "b" | null>(null);
   const [revealed, setRevealed] = useState(false);
+  
+  // A small local counter so we can show "Card 1 of 3" etc while moving through them
+  // This is offset by cardsAnsweredToday on mount.
+  const [localIndex, setLocalIndex] = useState(0);
+  const currentCardIndex = cardsAnsweredToday + localIndex;
 
-  const today = todayIso();
-  const cardsToday = history.filter((h) => h.at?.slice(0, 10) === today).length;
-  const limitReached = cardsToday >= DAILY_LIMIT;
+  useEffect(() => {
+    async function loadData() {
+      try {
+        const [profile, streakData, dailyData, resultsData] = await Promise.all([
+          getVibeProfile().catch(() => null),
+          getVibeStreak().catch(() => ({ current_streak: 0, cards_answered_today: 0 })),
+          getDailyCards().catch(() => ({ questions: [] })),
+          getVibeResults().catch(() => ({ data: [] }))
+        ]);
 
-  const matchRate =
-    history.length > 0
-      ? Math.round(
-          (history.filter((h) => h.myPick === h.theirPick).length /
-            history.length) *
-            100,
-        )
-      : 0;
+        const allPartners = [...(profile?.active_users || []), ...(profile?.inactive_users || [])];
+        if (profile) setMyUserId(profile.user_id);
+        if (allPartners.length > 0) {
+          setActivePartners(allPartners);
+          
+          // Use explicitly selected partner if it exists, otherwise default to first
+          const currentPId = partnerId || allPartners[0].user_id;
+          const currentPName = partnerId ? (allPartners.find((p: any) => p.user_id === partnerId)?.name || "Partner") : (allPartners[0].name || "Partner");
+          
+          setPartnerName(currentPName);
+          if (!partnerId) {
+            setPartnerId(currentPId);
+          }
 
-  const streak = (() => {
-    const set = new Set(activeDays);
-    let c = 0;
-    const d = new Date();
-    if (!set.has(d.toISOString().slice(0, 10))) d.setDate(d.getDate() - 1);
-    while (set.has(d.toISOString().slice(0, 10))) {
-      c++;
-      d.setDate(d.getDate() - 1);
+          // Fetch results specifically for this partner
+          const resultsData = await getVibeResults(currentPId).catch(() => ({ data: [] }));
+          if (resultsData?.data?.length > 0) {
+             setMatchRate(resultsData.data[0]?.cumulative_match_percent || 0);
+          }
+        }
+        
+        setStreak(streakData?.current_streak || 0);
+        setCardsAnsweredToday(streakData?.cards_answered_today || 0);
+        setDailyCards(dailyData?.questions || []);
+
+      } finally {
+        setLoading(false);
+      }
     }
-    return c;
-  })();
+    loadData();
+  }, [partnerId]); // Re-run loadData when partner changes so we get their specific stats
 
-  const card = TOT_CARDS[cardIdx % TOT_CARDS.length];
-  const matched = revealed && myPick === theirPick;
+  const limitReached = currentCardIndex >= DAILY_LIMIT || currentCardIndex >= dailyCards.length;
+  const card = !limitReached && dailyCards.length > 0 ? dailyCards[currentCardIndex] : null;
 
-  const handlePick = (pick: "a" | "b") => {
+  // WebSocket / Polling for partner's answer
+  useEffect(() => {
+    let ws: WebSocket | null = null;
+    let cancelled = false;
+    let interval: NodeJS.Timeout | null = null;
+    
+    if (revealed && theirPick === null && card && partnerId && myUserId) {
+      const cardId = card.id; // capture to avoid stale closures
+      const currentPartnerId = partnerId;
+      
+      const checkPartnerAnswer = async () => {
+        if (cancelled) return;
+        try {
+          const results = await getVibeResults(currentPartnerId);
+          if (cancelled) return;
+          
+          if (results?.data?.length > 0) {
+            const partnerData = results.data[0];
+            const matchedAns = partnerData?.matched_answers?.find((a: any) => a.question_id === cardId);
+            if (matchedAns && matchedAns.partner_selected_option) {
+              console.log("WS/POLL: Partner answered!", matchedAns.partner_selected_option);
+              setTheirPick(matchedAns.partner_selected_option.toLowerCase() as "a" | "b");
+              if (interval) clearInterval(interval);
+            }
+          }
+        } catch (e) {
+          console.error("Poll error:", e);
+        }
+      };
+      
+      // Immediate first check
+      checkPartnerAnswer();
+      
+      // Connect to WebSocket
+      const baseUrl = api.defaults.baseURL || "http://localhost:8006";
+      const wsUrl = `${baseUrl.replace('http', 'ws')}/vibecheck/cards/ws/${myUserId}`;
+      
+      try {
+          ws = new WebSocket(wsUrl);
+
+          ws.onopen = () => {
+            console.log("WS Connected:", wsUrl);
+          };
+
+          ws.onmessage = (event) => {
+            console.log("WS Message received:", event.data);
+            try {
+              const data = JSON.parse(event.data);
+              if (data.type === "PARTNER_ANSWERED" && data.partner_id === currentPartnerId) {
+                // Partner answered! Re-fetch the result
+                checkPartnerAnswer();
+              }
+            } catch(e) {}
+          };
+          
+          ws.onerror = (e) => {
+            console.error("WebSocket error:", e);
+            if (!interval && !cancelled) {
+                console.log("Falling back to polling...");
+                interval = setInterval(checkPartnerAnswer, 2000);
+            }
+          };
+
+          ws.onclose = () => {
+            console.log("WS Closed");
+            if (!interval && !cancelled) {
+                console.log("Falling back to polling...");
+                interval = setInterval(checkPartnerAnswer, 2000);
+            }
+          };
+      } catch (e) {
+          console.error("Failed to setup WS:", e);
+          if (!interval && !cancelled) {
+              interval = setInterval(checkPartnerAnswer, 2000);
+          }
+      }
+    }
+    return () => {
+      cancelled = true;
+      if (ws) ws.close();
+      if (interval) clearInterval(interval);
+    };
+  }, [revealed, theirPick, card?.id, partnerId, myUserId]);
+
+  const matched = revealed && myPick !== null && theirPick !== null && myPick === theirPick;
+
+  const handlePick = async (pick: "a" | "b") => {
     setMyPick(pick);
-    // Simulate partner pick
-    setTimeout(() => {
-      const fake = Math.random() > 0.4 ? pick : pick === "a" ? "b" : "a";
-      setTheirPick(fake);
+    if (!card) return;
+
+    try {
+      const option = pick === "a" ? "A" : "B";
+      // Submit single answer to backend
+      await submitVibeAnswers([{ question_id: card.id, selected_option: option }]);
+      
+      // Check if partner answered
+      let foundMatch = false;
+      if (partnerId) {
+          const results = await getVibeResults(partnerId);
+          
+          if (results?.data?.length > 0) {
+              console.log("RESULTS", JSON.stringify(results.data[0]));
+              const partnerData = results.data[0];
+              const matchedAns = partnerData.matched_answers?.find((a: any) => a.question_id === card.id);
+              if (matchedAns?.partner_selected_option) {
+                  setTheirPick(matchedAns.partner_selected_option.toLowerCase() as "a" | "b");
+                  setRevealed(true);
+                  foundMatch = true;
+              }
+          }
+      }
+
+      if (!foundMatch) {
+          setTheirPick(null);
+          setRevealed(true);
+      }
+
+    } catch (e) {
+      console.error("Failed to submit answer", e);
       setRevealed(true);
-    }, 800);
+    }
+  };
+
+  const handlePartnerSelect = (partner: any) => {
+    setPartnerId(partner.user_id);
+    setPartnerName(partner.name);
+    setPartnerSheet(false);
+    // Reset game state for new partner
+    setMyPick(null);
+    setTheirPick(null);
+    setRevealed(false);
+    setLocalIndex(0);
   };
 
   const nextCard = () => {
-    if (myPick && theirPick) {
-      const entry: PlayHistoryEntry = {
-        card,
-        myPick,
-        theirPick,
-        date: "Just now",
-        at: new Date().toISOString(),
-      };
-      setHistory((p) => [entry, ...p]);
-      if (!activeDays.includes(today))
-        setActiveDays((p) => [today, ...p].slice(0, 365));
-    }
-    setCardIdx((i) => i + 1);
+    setLocalIndex(prev => prev + 1);
     setMyPick(null);
     setTheirPick(null);
     setRevealed(false);
   };
+
+  if (loading) {
+      return (
+          <SafeAreaView style={[styles.safe, { justifyContent: 'center', alignItems: 'center' }]}>
+              <ActivityIndicator color={Colors.accent} size="large" />
+          </SafeAreaView>
+      );
+  }
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -142,23 +303,25 @@ export const PlayScreen: React.FC = () => {
                 color={Colors.accent}
                 style={{ lineHeight: 22 }}
               >
-                {matchRate}
+                {Math.round(matchRate)}
                 <AppText variant="mono" size={13} color={Colors.muted}>
                   %
                 </AppText>
               </AppText>
             </View>
-            <View style={styles.partnerPill}>
+            <TouchableOpacity onPress={() => setPartnerSheet(true)} style={styles.partnerPill}>
               <AppText
                 variant="mono"
                 color={Colors.accent}
                 style={{ fontSize: 10 }}
               >
-                ● SAM
+                ● {partnerName.toUpperCase()}
               </AppText>
-            </View>
+              {activePartners.length > 1 && (
+                <AppText color={Colors.accent} style={{ fontSize: 10, marginLeft: 4 }}>▼</AppText>
+              )}
+            </TouchableOpacity>
           </View>
-          {/* <View style={{backgroundColor:'#EAE2D4'}}><AppText variant="smallCaps" color={Colors.muted} >◐ 0 / 3 TODAY</AppText></View> */}
         </View>
 
         <View style={styles.inner}>
@@ -174,11 +337,11 @@ export const PlayScreen: React.FC = () => {
               <AppText
                 variant="display"
                 size={24}
-                style={{ lineHeight: 28, marginBottom: 6 }}
+                style={{ lineHeight: 28, marginBottom: 6, textAlign: "center" }}
               >
                 That's your{" "}
                 <AppText variant="serifItalic" size={24} color={Colors.accent}>
-                  three
+                  {numberToWord(DAILY_LIMIT)}
                 </AppText>{" "}
                 for today.
               </AppText>
@@ -188,10 +351,10 @@ export const PlayScreen: React.FC = () => {
                 color={Colors.muted}
                 style={{ textAlign: "center", lineHeight: 22 }}
               >
-                Come back tomorrow. The slowness is the point.
+                {getDailyMessage()}
               </AppText>
             </View>
-          ) : (
+          ) : card ? (
             <>
               {/* Prompt */}
               <View style={styles.prompt}>
@@ -200,7 +363,7 @@ export const PlayScreen: React.FC = () => {
                   color={Colors.accent}
                   style={{ marginBottom: 10 }}
                 >
-                  Card {cardsToday + 1} of {DAILY_LIMIT}
+                  Card {currentCardIndex + 1} of {DAILY_LIMIT}
                 </AppText>
                 <AppText
                   variant="display"
@@ -213,17 +376,17 @@ export const PlayScreen: React.FC = () => {
                   </AppText>
                 </AppText>
                 <AppText variant="serifItalic" size={14} color={Colors.muted}>
-                  {card.cat} · pick the one that's more you
+                  {card.category} · pick the one that's more you
                 </AppText>
               </View>
 
               {/* The card */}
               <ThisOrThatCard
-                card={card}
+                card={{ a: card.option_a, b: card.option_b, cat: card.category || "General" }}
                 myPick={myPick}
                 theirPick={theirPick}
                 revealed={revealed}
-                partnerName="Sam"
+                partnerName={partnerName}
                 onPick={handlePick}
               />
 
@@ -256,95 +419,108 @@ export const PlayScreen: React.FC = () => {
                   <View
                     style={[
                       styles.resultCard,
-                      matched ? styles.resultMatch : styles.resultDiffer,
+                      theirPick === null ? styles.resultDiffer : (matched ? styles.resultMatch : styles.resultDiffer),
                     ]}
                   >
-                    <AppText
-                      variant="display"
-                      size={32}
-                      color={matched ? Colors.sage : Colors.ink}
-                      style={{ lineHeight: 36 }}
-                    >
-                      {matched ? (
+                    {theirPick === null ? (
                         <>
-                          You{" "}
-                          <AppText
-                            variant="serifItalic"
-                            size={32}
-                            color={Colors.sage}
-                          >
-                            matched.
-                          </AppText>
+                            <AppText variant="display" size={32} color={Colors.ink} style={{ lineHeight: 36, textAlign: 'center' }}>
+                                Waiting for <AppText variant="serifItalic" size={32} color={Colors.accent}>{partnerName}</AppText>
+                            </AppText>
+                            <AppText variant="serifItalic" size={14} color={Colors.muted} style={{ marginTop: 6, textAlign: 'center' }}>
+                                We'll let you know when they answer.
+                            </AppText>
                         </>
-                      ) : (
+                    ) : (
                         <>
-                          You{" "}
-                          <AppText
-                            variant="serifItalic"
-                            size={32}
-                            color={Colors.accent}
-                          >
-                            differ.
-                          </AppText>
+                            <AppText
+                                variant="display"
+                                size={32}
+                                color={matched ? Colors.sage : Colors.ink}
+                                style={{ lineHeight: 36 }}
+                            >
+                            {matched ? (
+                                <>
+                                You{" "}
+                                <AppText
+                                    variant="serifItalic"
+                                    size={32}
+                                    color={Colors.sage}
+                                >
+                                    matched.
+                                </AppText>
+                                </>
+                            ) : (
+                                <>
+                                You{" "}
+                                <AppText
+                                    variant="serifItalic"
+                                    size={32}
+                                    color={Colors.accent}
+                                >
+                                    differ.
+                                </AppText>
+                                </>
+                            )}
+                            </AppText>
+                            <AppText
+                                variant="serifItalic"
+                                size={14}
+                                color={Colors.muted}
+                                style={{ marginTop: 6 }}
+                            >
+                            {matched
+                                ? "Same energy."
+                                : "Worth a second look — or a laugh."}
+                            </AppText>
                         </>
-                      )}
-                    </AppText>
-                    <AppText
-                      variant="serifItalic"
-                      size={14}
-                      color={Colors.muted}
-                      style={{ marginTop: 6 }}
-                    >
-                      {matched
-                        ? "Same energy."
-                        : "Worth a second look — or a laugh."}
-                    </AppText>
+                    )}
                   </View>
                   <AppButton full variant="solid" size="lg" onPress={nextCard}>
                     Next card →
                   </AppButton>
                 </View>
               )}
-
-              {/* Pulse teaser */}
-              {history.length >= 4 && (
-                <Pressable
-                  style={styles.pulseTease}
-                  onPress={() => navigation.navigate("Pulse")}
-                >
-                  <View style={{ flex: 1 }}>
-                    <AppText
-                      variant="smallCaps"
-                      color={Colors.accent}
-                      style={{ marginBottom: 4 }}
-                    >
-                      The Pulse · unlocked
-                    </AppText>
-
-                    <AppText
-                      variant="heading"
-                      size={16}
-                      color={Colors.bone}
-                      style={{ marginBottom: 2 }}
-                    >
-                      You're {matchRate}% in sync
-                    </AppText>
-
-                    <AppText
-                      variant="serifItalic"
-                      size={13}
-                      color={Colors.cream2}
-                    >
-                      See your patterns →
-                    </AppText>
-                  </View>
-
-                  <AppText size={18} color={Colors.accent}>
-                    →
-                  </AppText>
-                </Pressable>
-              )}
             </>
+          ) : null}
+
+          {/* Pulse teaser */}
+          {(currentCardIndex > 0 || cardsAnsweredToday > 0) && (
+            <Pressable
+                style={styles.pulseTease}
+                onPress={() => navigation.navigate("Pulse")}
+            >
+                <View style={{ flex: 1 }}>
+                <AppText
+                    variant="smallCaps"
+                    color={Colors.accent}
+                    style={{ marginBottom: 4 }}
+                >
+                    The Pulse · unlocked
+                </AppText>
+
+                <AppText
+                    variant="heading"
+                    size={16}
+                    color={Colors.bone}
+                    style={{ marginBottom: 2 }}
+                >
+                    You're {Math.round(matchRate)}% in sync
+                </AppText>
+
+                <AppText
+                    variant="serifItalic"
+                    size={13}
+                    color={Colors.cream2}
+                >
+                    See your patterns →
+                </AppText>
+                </View>
+
+                <AppText size={18} color={Colors.accent}>
+                →
+                </AppText>
+            </Pressable>
           )}
 
           <AppText
@@ -354,10 +530,57 @@ export const PlayScreen: React.FC = () => {
           >
             One card a day. Build the streak.
           </AppText>
+          <AppButton
+            variant="solid"
+            size="lg"
+            onPress={() => navigation.navigate("Profile")}
+          >
+            Leave Game →
+          </AppButton>
 
           <View style={{ height: 80 }} />
         </View>
       </ScrollView>
+
+      {/* Partner Selector Sheet */}
+      <BottomSheet
+        open={partnerSheet}
+        onClose={() => setPartnerSheet(false)}
+        title="Select Partner"
+        kicker="PLAYING WITH"
+      >
+        <View style={{ gap: 12 }}>
+          {activePartners.length === 0 && (
+            <AppText color={Colors.muted} style={{ textAlign: 'center', marginVertical: 20 }}>
+              No active partners found.
+            </AppText>
+          )}
+          {activePartners.map((p, idx) => (
+            <TouchableOpacity
+              key={idx}
+              style={[
+                styles.partnerSelectBtn,
+                partnerId === p.user_id && styles.partnerSelectBtnActive
+              ]}
+              onPress={() => handlePartnerSelect(p)}
+            >
+              <View>
+                <AppText variant="heading" size={18} color={partnerId === p.user_id ? Colors.bone : Colors.ink}>
+                  {p.name}
+                </AppText>
+                <AppText variant="mono" size={11} color={partnerId === p.user_id ? Colors.bone : Colors.muted}>
+                  MATCH: {Math.round(p.match_percentage)}%  •  STREAK: {p.streak_days}d
+                </AppText>
+              </View>
+              {partnerId === p.user_id && (
+                <AppText color={Colors.bone} variant="mono" size={12}>
+                  ACTIVE
+                </AppText>
+              )}
+            </TouchableOpacity>
+          ))}
+        </View>
+      </BottomSheet>
     </SafeAreaView>
   );
 };
@@ -382,15 +605,23 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 99,
     backgroundColor: `${Colors.accent}15`,
+    flexDirection: "row",
+    alignItems: "center",
   },
-  pill: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 99,
+  partnerSelectBtn: {
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.rule,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     backgroundColor: Colors.cream,
-    alignSelf: "flex-start",
   },
-  pillActive: { backgroundColor: `${Colors.accent}12` },
+  partnerSelectBtnActive: {
+    backgroundColor: Colors.accent,
+    borderColor: Colors.accent,
+  },
   inner: { padding: 24 },
   prompt: { textAlign: "center", alignItems: "center", marginBottom: 26 },
   limitCard: {

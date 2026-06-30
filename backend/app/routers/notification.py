@@ -3,11 +3,20 @@ from typing import List, Optional
 
 from app.routers.auth import get_current_user
 from app.schemas.notification import (
-    NotificationCreate, NotificationResponse, NotificationPaginatedResponse, GenericResponse
+    NotificationCreate, NotificationResponse, NotificationPaginatedResponse, GenericResponse, PresenceCreate
 )
 from app.services.notification import notification_service
 
 router = APIRouter(prefix="/notifications", tags=["Notifications"])
+
+@router.post("/presence", response_model=GenericResponse)
+async def log_user_presence(payload: PresenceCreate, current_user: dict = Depends(get_current_user)):
+    """Log user presence and trigger a notification for the partner."""
+    try:
+        result = await notification_service.log_presence(current_user["id"], payload)
+        return GenericResponse(**result)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/schedule", response_model=NotificationResponse)
 async def schedule_notification(payload: NotificationCreate, current_user: dict = Depends(get_current_user)):

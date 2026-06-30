@@ -335,8 +335,15 @@ class AuthService:
         )
         return True
 
-    async def delete_user(self, user_id: str) -> bool:
+    async def delete_user(self, user_id: str, password: str) -> bool:
         from bson import ObjectId
+        user = await self.collection.find_one({"_id": ObjectId(user_id)})
+        if not user:
+            raise ValueError("User not found")
+            
+        if not user.get("password_hash") or not verify_password(password, user["password_hash"]):
+            raise ValueError("Invalid password")
+            
         result = await self.collection.delete_one({"_id": ObjectId(user_id)})
         return result.deleted_count > 0
 

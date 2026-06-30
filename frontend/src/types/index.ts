@@ -159,12 +159,17 @@ export type AppScreen = 'mode' | 'welcome' | 'onboarding' | 'app';
 export type RootStackParamList = {
   ModeSelector: undefined;
   Login: undefined;
+  Signup: undefined;
+  VerifyEmail: { email: string };
+  ForgotPassword: undefined;
+  ResetPassword: { email: string };
   AlignedWelcome: undefined;
   AlignedOnboarding: undefined;
   AlignedApp: undefined;
   VibeWelcome: undefined;
   VibeOnboarding: undefined;
   VibeApp: undefined;
+  VibeProfile: undefined;
 };
 
 export type AlignedTabParamList = {

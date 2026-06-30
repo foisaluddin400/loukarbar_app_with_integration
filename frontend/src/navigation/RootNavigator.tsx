@@ -10,7 +10,12 @@ import { AlignedTabs } from './AlignedTabs';
 import { VCWelcome } from '../screens/vibecheck/VCWelcome';
 import { VCOnboarding } from '../screens/vibecheck/VCOnboarding';
 import { VibeTabs } from './VibeTabs';
+import { VCProfileScreen } from '../screens/vibecheck/VCProfileScreen';
 import Login from '@/screens/Login';
+import Signup from '@/screens/Signup';
+import VerifyEmail from '@/screens/VerifyEmail';
+import ForgotPassword from '@/screens/ForgotPassword';
+import ResetPassword from '@/screens/ResetPassword';
 
 const Stack = createStackNavigator<RootStackParamList>();
 
@@ -22,6 +27,10 @@ export default function RootNavigator() {
         initialRouteName="Login"
       >
         <Stack.Screen name="Login" component={Login} />
+        <Stack.Screen name="Signup" component={Signup} />
+        <Stack.Screen name="VerifyEmail" component={VerifyEmail} />
+        <Stack.Screen name="ForgotPassword" component={ForgotPassword} />
+        <Stack.Screen name="ResetPassword" component={ResetPassword} />
         <Stack.Screen name="ModeSelector" component={ModeSelector} />
         <Stack.Screen name="AlignedWelcome" component={Welcome} />
         <Stack.Screen name="AlignedOnboarding" component={Onboarding} />
@@ -29,6 +38,7 @@ export default function RootNavigator() {
         <Stack.Screen name="VibeWelcome" component={VCWelcome} />
         <Stack.Screen name="VibeOnboarding" component={VCOnboarding} />
         <Stack.Screen name="VibeApp" component={VibeTabs} />
+        <Stack.Screen name="VibeProfile" component={VCProfileScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

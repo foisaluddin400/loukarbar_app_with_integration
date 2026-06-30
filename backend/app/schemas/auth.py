@@ -1,8 +1,12 @@
 from pydantic import BaseModel, Field, AliasChoices, model_validator
+import datetime
 from typing import Optional, Dict, Any
 
 EMAIL_EXAMPLE = "x2@yopmail.com"
 PASSWORD_EXAMPLE = "Secure123"
+
+class UserUpdate(BaseModel):
+    name: str = Field(..., min_length=1, description="User's name")
 
 class SignupRequest(BaseModel):
     email: str = Field(..., examples=[EMAIL_EXAMPLE], description="User's email address")
@@ -37,6 +41,9 @@ class ChangePasswordRequest(BaseModel):
     old_password: str = Field(..., examples=[PASSWORD_EXAMPLE], description="Current password")
     new_password: str = Field(..., min_length=6, examples=[PASSWORD_EXAMPLE], description="New password (min 6 characters)")
 
+class DeleteAccountRequest(BaseModel):
+    password: str = Field(..., examples=[PASSWORD_EXAMPLE], description="Account password")
+
 class TokenResponse(BaseModel):
     access_token: str
     refresh_token: str
@@ -50,6 +57,8 @@ class UserMeResponse(BaseModel):
     is_aligned: bool = False
     partner: Optional[Dict[str, Any]] = None
     secret_key: Optional[str] = None
+    profile_photo_url: Optional[str] = None
+    last_active_at: Optional[datetime.datetime] = None
 
     model_config = {
         "populate_by_name": True

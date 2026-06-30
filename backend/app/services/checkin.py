@@ -5,6 +5,9 @@ from app.core.config import settings
 from app.schemas.checkin import CheckInCreate, CheckInUpdate
 from app.services.streak_algo import get_local_now
 from app.services.streak import get_time_name
+from app.services.notification import notification_service
+from app.schemas.notification import NotificationCreate, NotificationType
+from datetime import datetime, timezone
 
 class CheckInService:
     def __init__(self) -> None:
@@ -75,6 +78,26 @@ class CheckInService:
             inserted["id"] = str(inserted["_id"])
             inserted["_id"] = str(inserted["_id"])
             
+        # Send notification to partner
+        user = await self.users_collection.find_one({"_id": ObjectId(user_id)})
+        if user and user.get("is_aligned") and user.get("partner"):
+            partner_id = user["partner"].get("user_id")
+            if partner_id:
+                try:
+                    await notification_service.schedule_notification(
+                        sender_id=user_id,
+                        payload=NotificationCreate(
+                            recipient_id=partner_id,
+                            title="Check-in Complete",
+                            message=f"{user.get('name', 'Your partner')} has completed their check-in.",
+                            type=NotificationType.PARTNER_CHECKIN,
+                            scheduled_for=datetime.now(timezone.utc),
+                            timezone=payload.timezone
+                        )
+                    )
+                except Exception as e:
+                    print(f"Failed to send checkin creation notification: {e}")
+            
         return inserted
 
     async def update_checkin(self, user_id: str, payload: CheckInUpdate) -> Dict[str, Any]:
@@ -106,6 +129,26 @@ class CheckInService:
         if updated and "_id" in updated:
             updated["id"] = str(updated["_id"])
             updated["_id"] = str(updated["_id"])
+            
+        # Send notification to partner for update
+        user = await self.users_collection.find_one({"_id": ObjectId(user_id)})
+        if user and user.get("is_aligned") and user.get("partner"):
+            partner_id = user["partner"].get("user_id")
+            if partner_id:
+                try:
+                    await notification_service.schedule_notification(
+                        sender_id=user_id,
+                        payload=NotificationCreate(
+                            recipient_id=partner_id,
+                            title="Check-in Updated",
+                            message=f"{user.get('name', 'Your partner')} has updated their check-in.",
+                            type=NotificationType.PARTNER_CHECKIN,
+                            scheduled_for=datetime.now(timezone.utc),
+                            timezone=payload.timezone
+                        )
+                    )
+                except Exception as e:
+                    print(f"Failed to send checkin update notification: {e}")
             
         return updated
 

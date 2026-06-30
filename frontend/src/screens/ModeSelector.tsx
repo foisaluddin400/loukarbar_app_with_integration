@@ -11,11 +11,50 @@ import { StackNavigationProp } from "@react-navigation/stack";
 import { Colors } from "../constants/colors";
 import { AppText } from "../components/ui/AppText";
 import { RootStackParamList } from "@/types";
+import { getMe } from "../services/authApi";
+import { checkVibeStatus } from "../services/vibeCheckApi";
+import { useState } from "react";
 
 type Nav = StackNavigationProp<RootStackParamList, "ModeSelector">;
 
 export const ModeSelector: React.FC = () => {
   const nav = useNavigation<Nav>();
+  const [loadingAligned, setLoadingAligned] = useState(false);
+  const [loadingVibe, setLoadingVibe] = useState(false);
+
+  const handleVibePress = async () => {
+    try {
+      setLoadingVibe(true);
+      const status = await checkVibeStatus();
+      if (status.success) {
+        nav.navigate("VibeApp");
+      } else {
+        nav.navigate("VibeOnboarding");
+      }
+    } catch (error) {
+      console.log("Error checking vibe status:", error);
+      nav.navigate("VibeOnboarding");
+    } finally {
+      setLoadingVibe(false);
+    }
+  };
+
+  const handleAlignedPress = async () => {
+    try {
+      setLoadingAligned(true);
+      const user = await getMe();
+      if (user.is_aligned || user.partner || user.secret_key) {
+        nav.navigate("AlignedApp");
+      } else {
+        nav.navigate("AlignedWelcome");
+      }
+    } catch (error) {
+      console.log("Error checking user state:", error);
+      nav.navigate("AlignedWelcome");
+    } finally {
+      setLoadingAligned(false);
+    }
+  };
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -61,8 +100,9 @@ export const ModeSelector: React.FC = () => {
           {/* Options Cards */}
           <View style={styles.options}>
             <Pressable
-              style={({ pressed }) => [styles.card, pressed && styles.pressed]}
-              onPress={() => nav.navigate("AlignedWelcome")}
+              style={({ pressed }) => [styles.card, pressed && styles.pressed, loadingAligned && { opacity: 0.5 }]}
+              onPress={handleAlignedPress}
+              disabled={loadingAligned}
             >
               <AppText
                 variant="smallCaps"
@@ -88,8 +128,9 @@ export const ModeSelector: React.FC = () => {
             </Pressable>
 
             <Pressable
-              style={({ pressed }) => [styles.card, pressed && styles.pressed]}
-              onPress={() => nav.navigate("VibeWelcome")}
+              style={({ pressed }) => [styles.card, pressed && styles.pressed, loadingVibe && { opacity: 0.5 }]}
+              onPress={handleVibePress}
+              disabled={loadingVibe}
             >
               <AppText
                 variant="smallCaps"

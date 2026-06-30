@@ -10,6 +10,8 @@ class NotificationType(str, Enum):
     SYSTEM = "System"
     MAP_UPDATE = "Map Update"
     VIBE_DATE = "Vibe Date"
+    PRESENCE = "Presence"
+    PARTNER_CHECKIN = "Partner Check-in"
 
 class NotificationStatus(str, Enum):
     SCHEDULED = "Scheduled"
@@ -45,3 +47,9 @@ class NotificationPaginatedResponse(BaseModel):
 class GenericResponse(BaseModel):
     success: bool
     message: str
+
+class PresenceCreate(BaseModel):
+    timezone: str
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    city: Optional[str] = None

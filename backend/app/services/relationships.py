@@ -158,6 +158,9 @@ class RelationshipService:
     async def break_alignment(self, user_id: str) -> Dict[str, Any]:
         """Breaks the connection for the user and their partner."""
         from bson import ObjectId
+        from app.services.notification import notification_service
+        from app.schemas.notification import NotificationCreate, NotificationType
+        from datetime import datetime, timezone
         
         # 1. Fetch initiator
         initiator = await self.collection.find_one({"_id": ObjectId(user_id)})
@@ -205,6 +208,22 @@ class RelationshipService:
                     {"_id": partner["_id"]},
                     partner_updates
                 )
+                
+                # Notify partner
+                try:
+                    await notification_service.schedule_notification(
+                        sender_id=user_id,
+                        payload=NotificationCreate(
+                            recipient_id=partner_id,
+                            title="Alignment Broken",
+                            message="Your partner has broken the alignment.",
+                            type=NotificationType.SYSTEM,
+                            scheduled_for=datetime.now(timezone.utc),
+                            timezone="UTC"
+                        )
+                    )
+                except Exception as e:
+                    print(f"Failed to send break alignment notification: {e}")
             
         # 4. Fetch and return updated initiator data
         updated_initiator = await self.collection.find_one({"_id": initiator["_id"]})
@@ -299,6 +318,19 @@ class RelationshipService:
             partner["_id"] = str(partner["_id"])
             
         return partner
+
+    async def update_user(self, user_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
+        """Updates specific fields of the user profile."""
+        from bson import ObjectId
+        await self.collection.update_one(
+            {"_id": ObjectId(user_id)},
+            {"$set": updates}
+        )
+        updated = await self.collection.find_one({"_id": ObjectId(user_id)})
+        if updated and "_id" in updated:
+            updated["id"] = str(updated["_id"])
+            updated["_id"] = str(updated["_id"])
+        return updated
 
     async def update_profile_photo(self, user_id: str, file_path: str) -> Dict[str, Any]:
         """Updates the user's profile photo path."""

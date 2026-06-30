@@ -38,22 +38,38 @@ class VibeCardService:
             "Questions should be fun, lighthearted, and occasionally deep (e.g. 'Beach or Mountain', 'Plan everything or Wing it')."
         )
         
-        # Use gemini-3.5-flash for 2026 compatibility
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key={settings.GEMINI_API_KEY}"
-        headers = {"Content-Type": "application/json"}
-        payload = {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {
-                "responseMimeType": "application/json"
+        if settings.USE_LOCAL_LLM:
+            url = settings.LOCAL_LLM_URL
+            headers = {"Content-Type": "application/json"}
+            payload = {
+                "model": settings.LOCAL_LLM_MODEL,
+                "messages": [
+                    {"role": "system", "content": "You are a creative assistant."},
+                    {"role": "user", "content": prompt}
+                ],
+                "temperature": 0.7
             }
-        }
+        else:
+            # Use gemini-3.5-flash for 2026 compatibility
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key={settings.GEMINI_API_KEY}"
+            headers = {"Content-Type": "application/json"}
+            payload = {
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {
+                    "responseMimeType": "application/json"
+                }
+            }
 
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=45.0) as client:
                 response = await client.post(url, json=payload, headers=headers)
                 if response.status_code == 200:
                     data = response.json()
-                    raw_text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+                    
+                    if settings.USE_LOCAL_LLM:
+                        raw_text = data["choices"][0]["message"]["content"].strip()
+                    else:
+                        raw_text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
                     
                     # Robust parsing for JSON
                     if "```json" in raw_text:
@@ -68,9 +84,9 @@ class VibeCardService:
                         q["id"] = str(uuid.uuid4())
                     return questions
                 else:
-                    print(f"Gemini API Error: {response.status_code} - {response.text}")
+                    print(f"LLM API Error: {response.status_code} - {response.text}")
         except Exception as e:
-            print(f"Gemini generation error: {e}")
+            print(f"LLM generation error: {e}")
         
         # Static Fallback if Gemini fails (diverse enough for some variety)
         return [
@@ -110,21 +126,12 @@ class VibeCardService:
             except: # Concurrent insertion safety
                 pool_doc = await self.daily_pool.find_one({"date": today_str})
 
-        # Select 3 questions for everyone today. 
-        # We use the day of the year to rotate through the 12 questions in the pool.
-        # This ensures variety even if the pool isn't regenerated frequently.
+        # Return all 12 questions for the daily session
         questions_pool = pool_doc["questions"]
         if not questions_pool:
             return []
             
-        day_of_year = datetime.now(tz).timetuple().tm_yday
-        start_idx = (day_of_year % (len(questions_pool) // 3)) * 3
-        
-        # Ensure start_idx is valid
-        if start_idx + 3 > len(questions_pool):
-            start_idx = 0
-            
-        return questions_pool[start_idx : start_idx + 3]
+        return questions_pool
 
     async def submit_answers(self, user_id: str, payload: VibeAnswerSubmit) -> Dict[str, Any]:
         """Submit daily answers and update streak."""
@@ -136,18 +143,32 @@ class VibeCardService:
         now_local = datetime.now(tz)
         today_str = now_local.strftime("%m.%d.%Y")
         
-        # 1. Save Answers
-        answer_doc = {
-            "user_id": user_id,
-            "date": today_str,
-            "answers": [a.model_dump() for a in payload.answers],
-            "created_at": datetime.now(timezone.utc)
-        }
+        # 1. Save Answers (allow partial/sequential submissions)
+        new_answers = [a.model_dump() for a in payload.answers]
         
         try:
-            await self.user_answers.insert_one(answer_doc)
-        except:
-            raise ValueError("You have already answered today's questions.")
+            # We use an upsert with $set for the base fields and $addToSet for each new answer.
+            # To avoid duplicates if the user resubmits the same question, we just push it. 
+            # (MongoDB doesn't have an easy "upsert array element", so we'll just pull it first then push, or just trust the frontend only sends it once).
+            for ans in new_answers:
+                await self.user_answers.update_one(
+                    {"user_id": user_id, "date": today_str},
+                    {
+                        "$pull": {"answers": {"question_id": ans["question_id"]}},
+                    },
+                    upsert=False
+                )
+                
+            await self.user_answers.update_one(
+                {"user_id": user_id, "date": today_str},
+                {
+                    "$setOnInsert": {"created_at": datetime.now(timezone.utc)},
+                    "$push": {"answers": {"$each": new_answers}}
+                },
+                upsert=True
+            )
+        except Exception as e:
+            raise ValueError(f"Failed to submit answer: {str(e)}")
 
         # 2. Update Streak
         streak_doc = await self.user_streaks.find_one({"user_id": user_id})
@@ -231,6 +252,7 @@ class VibeCardService:
                 if is_match: matches += 1
                 
                 matched_details.append({
+                    "question_id": qid,
                     "question": q["text"],
                     "option_a": q["option_a"],
                     "option_b": q["option_b"],
@@ -243,12 +265,14 @@ class VibeCardService:
                 
             daily_match_percent = (matches / total_q * 100) if total_q > 0 else 0.0
 
-            # Handle Cumulative Score (EMA)
+            # Handle Cumulative Score (EMA) ONLY if both have finished all daily questions
             score_doc = await self.cumulative_scores.find_one({"user_id": user_id, "partner_id": p_id})
             current_cumulative = score_doc["score"] if score_doc else 50.0
+            
+            both_finished = (len(my_map) >= total_q and len(pa_map) >= total_q)
             last_updated = score_doc.get("last_updated_date") if score_doc else None
             
-            if last_updated != today_str:
+            if both_finished and last_updated != today_str:
                 new_cumulative = (current_cumulative * 0.9) + (daily_match_percent * 0.1)
                 # Update both sides
                 await self.cumulative_scores.update_one(
@@ -268,7 +292,8 @@ class VibeCardService:
                 "partner_name": partner_profile["name"],
                 "daily_match_percent": round(daily_match_percent, 1),
                 "cumulative_match_percent": round(current_cumulative, 1),
-                "matched_answers": matched_details
+                "matched_answers": matched_details,
+                "both_finished": both_finished
             })
 
         return results
@@ -281,15 +306,16 @@ class VibeCardService:
             
         today_str = datetime.now(tz).strftime("%m.%d.%Y")
         streak_doc = await self.user_streaks.find_one({"user_id": user_id})
-        is_answered = await self.user_answers.find_one({"user_id": user_id, "date": today_str})
+        ans_doc = await self.user_answers.find_one({"user_id": user_id, "date": today_str})
+        cards_answered_today = len(ans_doc["answers"]) if ans_doc and "answers" in ans_doc else 0
         
         if not streak_doc:
-            return {"current_streak": 0, "last_answered": None, "is_answered_today": False}
+            return {"current_streak": 0, "last_answered": None, "cards_answered_today": cards_answered_today}
             
         return {
             "current_streak": streak_doc["current_streak"],
             "last_answered": streak_doc["updated_at"],
-            "is_answered_today": is_answered is not None
+            "cards_answered_today": cards_answered_today
         }
 
     async def get_history(self, user_id: str, partner_id: Optional[str] = None, category: str = "All", page: int = 1, size: int = 20) -> Tuple[List[Dict[str, Any]], int]:

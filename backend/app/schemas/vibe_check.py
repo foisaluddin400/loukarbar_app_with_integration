@@ -5,10 +5,14 @@ from datetime import datetime
 class VibeCheckProfileCreate(BaseModel):
     name: str
 
+class VibeCheckProfileUpdate(BaseModel):
+    name: Optional[str] = None
+
 class VibeCheckProfileResponse(BaseModel):
     user_id: str
     name: str
     vibe_key: str
+    profile_picture: Optional[str] = None
     connect: int
     active: int
     active_users: List["PartnerStats"] = []

@@ -1,13 +1,20 @@
-from fastapi import APIRouter, Depends, HTTPException, status
-from typing import List
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
+from fastapi.responses import FileResponse
+from typing import List, Optional
+import os
+import shutil
+import uuid
 from app.routers.auth import get_current_user
 from app.schemas.vibe_check import (
-    VibeCheckProfileCreate, VibeCheckProfileResponse, VibeCheckGenericResponse,
+    VibeCheckProfileCreate, VibeCheckProfileUpdate, VibeCheckProfileResponse, VibeCheckGenericResponse,
     VibeCheckConnectRequest, VibeCheckConnectionsResponse, VibeCheckRequestsResponse,
     VibeCheckRespondRequest, VibeInviteResponse, VibeInviteValidateResponse,
     VibeInviteAcceptRequest, VibeInviteAcceptResponse
 )
 from app.services.vibe_check import vibe_check_service
+import os
+import shutil
+import uuid
 
 router = APIRouter(prefix="/vibecheck", tags=["VibeCheck"])
 
@@ -50,6 +57,38 @@ async def get_vibecheck_profile(current_user: dict = Depends(get_current_user)):
     if not profile:
         raise HTTPException(status_code=404, detail="VibeCheck profile not setup yet.")
     return profile
+
+@router.post("/profile/picture", response_model=VibeCheckProfileResponse)
+async def upload_vibe_photo(file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
+    """Uploads a profile photo for the authenticated user's VibeCheck profile."""
+    try:
+        os.makedirs("uploads/vibe_profiles", exist_ok=True)
+        ext = os.path.splitext(file.filename)[1]
+        if not ext:
+            ext = ".jpg"
+        filename = f"{uuid.uuid4().hex}{ext}"
+        file_path = os.path.join("uploads", "vibe_profiles", filename)
+        
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+            
+        updated = await vibe_check_service.update_profile_picture(current_user["id"], file_path)
+        return updated
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/profile/picture", response_model=VibeCheckProfileResponse)
+async def delete_vibe_photo(current_user: dict = Depends(get_current_user)):
+    """Deletes the authenticated user's VibeCheck profile picture."""
+    try:
+        updated = await vibe_check_service.delete_profile_picture(current_user["id"])
+        return updated
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/setup", response_model=VibeCheckProfileResponse)
 async def setup_vibecheck_profile(payload: VibeCheckProfileCreate, current_user: dict = Depends(get_current_user)):
@@ -130,3 +169,87 @@ async def check_vibecheck_status(current_user: dict = Depends(get_current_user))
     if profile:
         return {"success": True, "message": f"Profile exists for {profile['name']}"}
     return {"success": False, "message": "Profile not setup"}
+
+# --- Profile Management ---
+
+@router.patch("/profile", response_model=VibeCheckProfileResponse)
+async def update_vibecheck_profile(payload: VibeCheckProfileUpdate, current_user: dict = Depends(get_current_user)):
+    """Update the user's VibeCheck profile (name)."""
+    try:
+        return await vibe_check_service.update_profile(current_user["id"], name=payload.name)
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/profile/picture", response_model=VibeCheckProfileResponse)
+async def upload_vibecheck_profile_picture(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user)
+):
+    """Upload or update profile picture for VibeCheck."""
+    try:
+        os.makedirs("uploads/vibecheck", exist_ok=True)
+        ext = os.path.splitext(file.filename)[1] if file.filename else ".jpg"
+        if not ext:
+            ext = ".jpg"
+        filename = f"{uuid.uuid4().hex}{ext}"
+        file_path = os.path.join("uploads", "vibecheck", filename)
+        
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        return await vibe_check_service.update_profile_picture(current_user["id"], file_path)
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/profile/picture", response_model=VibeCheckGenericResponse)
+async def delete_vibecheck_profile_picture(current_user: dict = Depends(get_current_user)):
+    """Delete the user's VibeCheck profile picture."""
+    try:
+        return await vibe_check_service.delete_profile_picture(current_user["id"])
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/profile", response_model=VibeCheckGenericResponse)
+async def delete_vibecheck_profile(current_user: dict = Depends(get_current_user)):
+    """Delete the user's entire VibeCheck profile and all related data."""
+    try:
+        return await vibe_check_service.delete_profile(current_user["id"])
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/scan-qr", response_model=VibeCheckGenericResponse)
+async def scan_qr_from_image(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user)
+):
+    """Scan a QR code from an uploaded image to extract a Vibe Key."""
+    try:
+        import cv2
+        import numpy as np
+        
+        contents = await file.read()
+        nparr = np.frombuffer(contents, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        
+        if img is None:
+            raise ValueError("Could not decode image.")
+            
+        detector = cv2.QRCodeDetector()
+        data, bbox, _ = detector.detectAndDecode(img)
+        
+        if not data:
+            raise ValueError("No QR code found in the image.")
+            
+        return {"success": True, "message": data}
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

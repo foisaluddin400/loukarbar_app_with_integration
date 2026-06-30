@@ -1,5 +1,6 @@
 import random
 import string
+import os
 from typing import Dict, Any, Optional, List
 from motor.motor_asyncio import AsyncIOMotorClient
 from bson import ObjectId
@@ -98,6 +99,7 @@ class VibeCheckService:
                     streak_days = streak_doc["current_streak"] if streak_doc else 0
                     
                     stats = {
+                        "user_id": p["user_id"],
                         "name": p["name"],
                         "match_percentage": match_percentage,
                         "streak_days": streak_days
@@ -143,6 +145,25 @@ class VibeCheckService:
 
         return await self.get_profile(user_id)
 
+    async def update_profile_picture(self, user_id: str, file_path: str) -> Dict[str, Any]:
+        """Update the user's VibeCheck profile picture."""
+        # Convert local path to an accessible URL path (assuming StaticFiles mounted at /uploads)
+        url_path = f"/{file_path.replace(os.sep, '/')}"
+        
+        await self.profiles.update_one(
+            {"user_id": user_id},
+            {"$set": {"profile_picture": url_path, "updated_at": datetime.now(timezone.utc)}}
+        )
+        return await self.get_profile(user_id)
+
+    async def delete_profile_picture(self, user_id: str) -> Dict[str, Any]:
+        """Remove the user's VibeCheck profile picture."""
+        await self.profiles.update_one(
+            {"user_id": user_id},
+            {"$set": {"profile_picture": None, "updated_at": datetime.now(timezone.utc)}}
+        )
+        return await self.get_profile(user_id)
+
     async def get_connections(self, user_id: str) -> List[Dict[str, Any]]:
         """List all people this user is connected with in VibeCheck."""
         cursor = self.connections.find({"user_id": user_id})
@@ -183,19 +204,29 @@ class VibeCheckService:
 
         now = datetime.now(timezone.utc)
         
-        # 4. Create pending request
-        await self.requests.update_one(
-            {"sender_id": user_id, "recipient_id": target["user_id"]},
-            {"$setOnInsert": {
-                "sender_id": user_id, 
-                "recipient_id": target["user_id"], 
-                "sender_name": initiator["name"],
-                "created_at": now
-            }},
+        # 4. Create mutual connections instantly
+        # Me -> Target
+        await self.connections.update_one(
+            {"user_id": user_id, "partner_id": target["user_id"]},
+            {"$setOnInsert": {"user_id": user_id, "partner_id": target["user_id"], "connected_at": now}},
+            upsert=True
+        )
+        # Target -> Me
+        await self.connections.update_one(
+            {"user_id": target["user_id"], "partner_id": user_id},
+            {"$setOnInsert": {"user_id": target["user_id"], "partner_id": user_id, "connected_at": now}},
             upsert=True
         )
 
-        return {"success": True, "message": f"Connection request sent to {target['name']}."}
+        # Optionally, remove any pending requests between these two since they are now connected
+        await self.requests.delete_many({
+            "$or": [
+                {"sender_id": user_id, "recipient_id": target["user_id"]},
+                {"sender_id": target["user_id"], "recipient_id": user_id}
+            ]
+        })
+
+        return {"success": True, "message": f"Successfully connected with {target['name']}!"}
 
     async def get_pending_requests(self, user_id: str) -> List[Dict[str, Any]]:
         """List all pending connection requests for this user."""
@@ -384,5 +415,96 @@ class VibeCheckService:
             partner_id=invite["inviter_id"],
             partner_name=invite["inviter_name"]
         )
+
+    # --- Profile Management ---
+
+    async def update_profile(self, user_id: str, name: Optional[str] = None) -> Dict[str, Any]:
+        """Update the user's VibeCheck profile name."""
+        existing = await self.profiles.find_one({"user_id": user_id})
+        if not existing:
+            raise ValueError("VibeCheck profile not found.")
+        
+        update_data = {"updated_at": datetime.now(timezone.utc)}
+        if name is not None and name.strip():
+            update_data["name"] = name.strip()
+        
+        await self.profiles.update_one(
+            {"user_id": user_id},
+            {"$set": update_data}
+        )
+        return await self.get_profile(user_id)
+
+    async def update_profile_picture(self, user_id: str, file_path: str) -> Dict[str, Any]:
+        """Save or update profile picture path for the user."""
+        existing = await self.profiles.find_one({"user_id": user_id})
+        if not existing:
+            raise ValueError("VibeCheck profile not found.")
+        
+        # Delete old file if exists
+        old_path = existing.get("profile_picture")
+        if old_path:
+            import os
+            if os.path.exists(old_path):
+                os.remove(old_path)
+        
+        await self.profiles.update_one(
+            {"user_id": user_id},
+            {"$set": {"profile_picture": file_path, "updated_at": datetime.now(timezone.utc)}}
+        )
+        return await self.get_profile(user_id)
+
+    async def delete_profile_picture(self, user_id: str) -> Dict[str, Any]:
+        """Remove profile picture for the user."""
+        existing = await self.profiles.find_one({"user_id": user_id})
+        if not existing:
+            raise ValueError("VibeCheck profile not found.")
+        
+        old_path = existing.get("profile_picture")
+        if old_path:
+            import os
+            if os.path.exists(old_path):
+                os.remove(old_path)
+        
+        await self.profiles.update_one(
+            {"user_id": user_id},
+            {"$set": {"profile_picture": None, "updated_at": datetime.now(timezone.utc)}}
+        )
+        return {"success": True, "message": "Profile picture removed."}
+
+    async def delete_profile(self, user_id: str) -> Dict[str, Any]:
+        """Delete the user's entire VibeCheck profile and all related data."""
+        existing = await self.profiles.find_one({"user_id": user_id})
+        if not existing:
+            raise ValueError("VibeCheck profile not found.")
+        
+        # Delete profile picture file if exists
+        old_path = existing.get("profile_picture")
+        if old_path:
+            import os
+            if os.path.exists(old_path):
+                os.remove(old_path)
+        
+        # Delete all connections (both directions)
+        await self.connections.delete_many({"user_id": user_id})
+        await self.connections.delete_many({"partner_id": user_id})
+        
+        # Delete all pending requests (both sent and received)
+        await self.requests.delete_many({"sender_id": user_id})
+        await self.requests.delete_many({"recipient_id": user_id})
+        
+        # Delete all invites
+        await self.invites.delete_many({"inviter_id": user_id})
+        
+        # Delete cumulative scores
+        await self.cumulative_scores.delete_many({"user_id": user_id})
+        await self.cumulative_scores.delete_many({"partner_id": user_id})
+        
+        # Delete streaks
+        await self.user_streaks.delete_many({"user_id": user_id})
+        
+        # Delete the profile itself
+        await self.profiles.delete_one({"user_id": user_id})
+        
+        return {"success": True, "message": "VibeCheck profile and all related data deleted."}
 
 vibe_check_service = VibeCheckService()

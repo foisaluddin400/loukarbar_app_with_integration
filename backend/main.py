@@ -31,6 +31,10 @@ app = FastAPI(
 # CORS configuration
 origins = [
     "http://localhost:8081",
+    "http://localhost:4002",
+    "http://localhost:4003",
+    "http://127.0.0.1:4002",
+    "http://127.0.0.1:4003",
 ]
 
 if settings.FRONTEND_URL:

@@ -1,5 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from typing import List, Optional
+from fastapi import APIRouter, Depends, HTTPException, Query, status, WebSocket, WebSocketDisconnect
+from typing import List, Optional, Dict
+import asyncio
 
 from app.routers.auth import get_current_user
 from app.schemas.vibe_card import (
@@ -9,6 +10,42 @@ from app.schemas.vibe_card import (
 from app.services.vibe_card import vibe_card_service
 
 router = APIRouter(prefix="/vibecheck/cards", tags=["VibeCheck Cards"])
+
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: Dict[str, WebSocket] = {}
+
+    async def connect(self, websocket: WebSocket, user_id: str):
+        await websocket.accept()
+        self.active_connections[user_id] = websocket
+        print(f"WS CONNECTED: {user_id}. Total active: {len(self.active_connections)}")
+
+    def disconnect(self, user_id: str):
+        if user_id in self.active_connections:
+            del self.active_connections[user_id]
+            print(f"WS DISCONNECTED: {user_id}")
+
+    async def send_personal_message(self, message: dict, user_id: str):
+        print(f"WS ATTEMPT SEND to {user_id}: {message}")
+        if user_id in self.active_connections:
+            try:
+                await self.active_connections[user_id].send_json(message)
+                print(f"WS SUCCESS SEND to {user_id}")
+            except Exception as e:
+                print(f"Error sending ws message to {user_id}: {e}")
+        else:
+            print(f"WS FAILED: {user_id} not in active_connections (Keys: {list(self.active_connections.keys())})")
+
+manager = ConnectionManager()
+
+@router.websocket("/ws/{user_id}")
+async def websocket_endpoint(websocket: WebSocket, user_id: str):
+    await manager.connect(websocket, user_id)
+    try:
+        while True:
+            data = await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(user_id)
 
 @router.get("/history", response_model=VibeHistoryPaginatedResponse)
 async def get_vibe_card_history(
@@ -58,7 +95,22 @@ async def submit_vibe_answers(
 ):
     """Submit your answers for today's Vibe Cards."""
     try:
-        return await vibe_card_service.submit_answers(current_user["id"], payload)
+        print(f"SUBMIT ANSWERS: user_id={current_user['id']}")
+        res = await vibe_card_service.submit_answers(current_user["id"], payload)
+        
+        # Broadcast to partners
+        cursor = vibe_card_service.vibe_connections.find({"user_id": current_user["id"]}, {"partner_id": 1})
+        conn_docs = await cursor.to_list(length=None)
+        partner_ids = [c["partner_id"] for c in conn_docs]
+        print(f"BROADCASTING to partners: {partner_ids}")
+        
+        for p_id in partner_ids:
+            await manager.send_personal_message(
+                {"type": "PARTNER_ANSWERED", "partner_id": current_user["id"]}, 
+                p_id
+            )
+            
+        return res
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:

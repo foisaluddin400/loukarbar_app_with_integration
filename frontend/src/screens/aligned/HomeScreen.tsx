@@ -21,6 +21,11 @@ import Rhythms from "./Rhythms";
 import { AppTextInput } from "@/components/ui/AppTextInput";
 import AlignedNav from "@/components/ui/AlignedNav";
 import OurPlaylist from "./OurPlaylist";
+import { usePresenceTracker } from "../../hooks/usePresenceTracker";
+import { getMe } from "../../services/authApi";
+import { getStreak } from "../../services/streakApi";
+import { completeRitual } from "../../services/ritualApi";
+import { createCheckin, updateCheckin, getCheckin, getQuestionsEndpoint } from "../../services/checkinApi";
 
 const MOODS_DESIRE = [
   { mark: "◯", label: "At peace" },
@@ -68,18 +73,161 @@ const RITUAL_BY_TOD: Record<
 };
 
 export const HomeScreen: React.FC = () => {
+  usePresenceTracker();
   const tod = useTimeOfDay();
   const ritual = RITUAL_BY_TOD[tod];
   const [activeUsTab, setActiveUsTab] = useState<"TIME" | "DATES" | "REUNION">(
     "TIME",
   );
+  const [userName, setUserName] = useState<string>("User");
+
+  React.useEffect(() => {
+    const fetchUser = async () => {
+      try {
+        const data = await getMe();
+        if (data && data.name) {
+          const firstName = data.name.trim().split(" ")[0];
+          setUserName(firstName);
+        }
+      } catch (err) {
+        console.log("Error fetching user for greeting:", err);
+      }
+    };
+    fetchUser();
+  }, []);
+
   const [activeUser] = useState<"lou" | "amanda">("lou");
   const [sheet, setSheet] = useState<string | null>(null);
   const [louMood, setLouMood] = usePersist<number>("home.louMood", 1);
   const [amandaMood, setAmandaMood] = usePersist<number>("home.amandaMood", 3);
-  const [apprMsg, setApprMsg] = useState("");
   const [weScore] = usePersist<number>("home.weScore", 72);
-  const [streak] = usePersist<number>("home.streak", 5);
+  const [streak, setStreak] = useState<number>(0);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Appreciation State
+  const [appreciationText, setAppreciationText] = useState("");
+
+  // Checkin State
+  const [checkinQ1, setCheckinQ1] = useState("");
+  const [checkinQ2, setCheckinQ2] = useState("");
+  const [checkinQ3, setCheckinQ3] = useState("");
+  const [hasCheckedInToday, setHasCheckedInToday] = useState(false);
+  const [partnerCheckin, setPartnerCheckin] = useState<any>(null);
+  const [showPartnerCheckin, setShowPartnerCheckin] = useState(false);
+  
+  const [questions, setQuestions] = useState({
+    question_1: "How are you feeling?",
+    question_2: "What do you need most?",
+    question_3: "One thing on your mind..."
+  });
+
+  React.useEffect(() => {
+    const loadData = async () => {
+      try {
+        const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        const streakData = await getStreak(tz);
+        if (streakData) setStreak(streakData.current_streak);
+      } catch (e) {
+        console.log("Error fetching streak:", e);
+      }
+
+      try {
+        const qData = await getQuestionsEndpoint();
+        if (qData && qData.data) {
+          setQuestions(qData.data);
+        }
+      } catch (e) {
+        console.log("Error fetching questions:", e);
+      }
+
+      try {
+        const today = new Date().toLocaleDateString('en-US', {
+          month: '2-digit', day: '2-digit', year: 'numeric'
+        }).replace(/\//g, '.');
+        const checkinData = await getCheckin(today);
+        if (checkinData && checkinData.data) {
+          if (checkinData.data.my_check_in) {
+            setCheckinQ1(checkinData.data.my_check_in.answer_1);
+            setCheckinQ2(checkinData.data.my_check_in.answer_2);
+            setCheckinQ3(checkinData.data.my_check_in.answer_3);
+            setHasCheckedInToday(true);
+          }
+          if (checkinData.data.partner_check_in) {
+            setPartnerCheckin(checkinData.data.partner_check_in);
+          }
+        }
+      } catch (e) {
+        console.log("Error fetching existing checkin:", e);
+      }
+    };
+    loadData();
+  }, []);
+
+  const handleAppreciationSubmit = async () => {
+    if (!appreciationText.trim() || isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const res = await completeRitual({
+        ritual_type: 'appreciation',
+        text: appreciationText,
+        timezone: tz,
+        time_name: tod
+      });
+      setStreak(res.streak);
+      setSheet(null);
+      setAppreciationText("");
+    } catch (e) {
+      console.log("Error completing appreciation:", e);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleCheckinSubmit = async () => {
+    if (!checkinQ1.trim() || !checkinQ2.trim() || !checkinQ3.trim() || isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const today = new Date().toLocaleDateString('en-US', {
+        month: '2-digit', day: '2-digit', year: 'numeric'
+      }).replace(/\//g, '.');
+      
+      if (hasCheckedInToday) {
+        await updateCheckin({
+          date: today,
+          answer_1: checkinQ1,
+          answer_2: checkinQ2,
+          answer_3: checkinQ3,
+          timezone: tz,
+          time_name: tod
+        });
+      } else {
+        await createCheckin({
+          date: today,
+          answer_1: checkinQ1,
+          answer_2: checkinQ2,
+          answer_3: checkinQ3,
+          timezone: tz,
+          time_name: tod
+        });
+        
+        const res = await completeRitual({
+          ritual_type: 'checkin',
+          timezone: tz,
+          time_name: tod
+        });
+        setStreak(res.streak);
+        setHasCheckedInToday(true);
+      }
+      
+      setSheet(null);
+    } catch (e) {
+      console.log("Error submitting checkin:", e);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   const reunionDate = new Date("2026-03-15");
   const days = Math.floor(
@@ -98,7 +246,7 @@ export const HomeScreen: React.FC = () => {
     <SafeAreaView style={styles.safe}>
       <AlignedNav></AlignedNav>
       <ScrollView showsVerticalScrollIndicator={false}>
-        <PresenceStrip activeUser={activeUser} />
+        <PresenceStrip />
 
         <View style={styles.inner}>
           {/* Greeting */}
@@ -121,7 +269,7 @@ export const HomeScreen: React.FC = () => {
               <AppText variant="serifItalic" size={44} color={Colors.accent}>
                 {greeting}
               </AppText>
-              {",\nLou."}
+              {`,\n${userName}.`}
             </AppText>
           </View>
 
@@ -302,17 +450,24 @@ export const HomeScreen: React.FC = () => {
                    <AppText variant="serifItalic" size={15} color={Colors.muted} style={{ marginBottom: 18, lineHeight: 22 }}>
                      One thing you noticed about them this week. Small is fine — true is better.
                    </AppText>
-                   <AppTextInput multiline placeholder="One thing I love about you is..." style={{ minHeight: 140 }} />
+                   <AppTextInput 
+                     multiline 
+                     placeholder="One thing I love about you is..." 
+                     style={{ minHeight: 140 }} 
+                     value={appreciationText}
+                     onChangeText={setAppreciationText}
+                   />
                 
                  </View>
         <AppButton
           variant="solid"
           full
           size="lg"
-          onPress={() => setSheet(null)}
+          onPress={handleAppreciationSubmit}
+          disabled={isSubmitting || !appreciationText.trim()}
           style={{ marginTop: 22 }}
         >
-          Send →
+          {isSubmitting ? "Sending..." : "Send →"}
         </AppButton>
       </BottomSheet>
 
@@ -335,19 +490,74 @@ export const HomeScreen: React.FC = () => {
          Three questions. Honest answers. A gentle pulse on where you both are this week.
         </AppText>
 
-        <AppTextInput label="How are you feeling?" n="01" placeholder="Honestly, I'm..." />
+        {partnerCheckin && (
+          <Pressable 
+            onPress={() => setShowPartnerCheckin(!showPartnerCheckin)}
+            style={{ alignSelf: 'flex-start', paddingVertical: 8, paddingHorizontal: 12, backgroundColor: Colors.rule, borderRadius: 20, marginBottom: 15 }}
+          >
+            <AppText variant="mono" color={Colors.ink} style={{ fontSize: 10 }}>
+              {showPartnerCheckin ? "WRITE YOURS" : "SEE PARTNER'S"}
+            </AppText>
+          </Pressable>
+        )}
 
-        <AppTextInput label="What Do you need most" n="02" placeholder="I could use..." />
+        {showPartnerCheckin ? (
+          <View style={{ marginBottom: 20 }}>
+            <View style={{ marginBottom: 20 }}>
+              <AppText variant="smallCaps" color={Colors.muted} style={{ marginBottom: 4 }}>
+                01. {questions.question_1}
+              </AppText>
+              <AppText variant="serifItalic" size={17} color={Colors.ink}>
+                "{partnerCheckin.answer_1}"
+              </AppText>
+            </View>
+            <View style={{ marginBottom: 20 }}>
+              <AppText variant="smallCaps" color={Colors.muted} style={{ marginBottom: 4 }}>
+                02. {questions.question_2}
+              </AppText>
+              <AppText variant="serifItalic" size={17} color={Colors.ink}>
+                "{partnerCheckin.answer_2}"
+              </AppText>
+            </View>
+            <View style={{ marginBottom: 20 }}>
+              <AppText variant="smallCaps" color={Colors.muted} style={{ marginBottom: 4 }}>
+                03. {questions.question_3}
+              </AppText>
+              <AppText variant="serifItalic" size={17} color={Colors.ink}>
+                "{partnerCheckin.answer_3}"
+              </AppText>
+            </View>
+          </View>
+        ) : (
+          <>
+            <AppTextInput 
+              label={questions.question_1} n="01" placeholder="Honestly, I'm..." 
+              value={checkinQ1} onChangeText={setCheckinQ1} 
+            />
 
-        <AppTextInput label="One Thing On you mind" n="01" placeholder="I'hve been thinking about..." />
-        <AppButton
-          variant="solid"
-          full
-          size="lg"
-          onPress={() => setSheet(null)}
-        >
-          Submit →
-        </AppButton>
+            <AppTextInput 
+              label={questions.question_2} n="02" placeholder="I could use..." 
+              value={checkinQ2} onChangeText={setCheckinQ2} 
+            />
+
+            <AppTextInput 
+              label={questions.question_3} n="03" placeholder="I've been thinking about..." 
+              value={checkinQ3} onChangeText={setCheckinQ3} 
+            />
+          </>
+        )}
+
+        {!showPartnerCheckin && (
+          <AppButton
+            variant="solid"
+            full
+            size="lg"
+            onPress={handleCheckinSubmit}
+            disabled={isSubmitting || !checkinQ1.trim() || !checkinQ2.trim() || !checkinQ3.trim()}
+          >
+            {isSubmitting ? (hasCheckedInToday ? "Updating..." : "Submitting...") : (hasCheckedInToday ? "Update →" : "Submit →")}
+          </AppButton>
+        )}
       </BottomSheet>
 
       {/* Sync score sheet */}

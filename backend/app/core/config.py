@@ -28,6 +28,11 @@ class Settings(BaseSettings):
     # Gemini Integration
     GEMINI_API_KEY: str = ""
     
+    # Local LLM Integration
+    USE_LOCAL_LLM: bool = False
+    LOCAL_LLM_URL: str = "http://127.0.0.1:1234/v1/chat/completions"
+    LOCAL_LLM_MODEL: str = "llama-3.2-3b-instruct"
+    
     FRONTEND_URL: str = ""
     
     # Read from .env if present

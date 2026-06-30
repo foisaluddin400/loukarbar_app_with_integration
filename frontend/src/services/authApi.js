@@ -8,7 +8,7 @@ export const signupUser = async (email, password) => {
 };
 
 export const verifyEmail = async (email, otp_code) => {
-  const response = await api.post('/auth/verify-email', { email, otp_code });
+  const response = await api.post('/auth/verify-email', { email, otp: otp_code });
   return response.data;
 };
 
@@ -48,7 +48,7 @@ export const forgotPassword = async (email) => {
 };
 
 export const resetPassword = async (email, otp_code, new_password) => {
-  const response = await api.post('/auth/reset-password', { email, otp_code, new_password });
+  const response = await api.post('/auth/reset-password', { email, otp: otp_code, new_password });
   return response.data;
 };
 

@@ -83,6 +83,7 @@ class RelationshipResponseData(BaseModel):
     secret_key: Optional[str] = None
     is_aligned: bool = False
     partner: Optional[PartnerInfo] = None
+    last_active_at: Optional[datetime.datetime] = None
 
     model_config = {
         "populate_by_name": True

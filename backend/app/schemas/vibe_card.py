@@ -35,6 +35,7 @@ class VibeAnswerSubmit(BaseModel):
     }
 
 class VibeMatchedAnswer(BaseModel):
+    question_id: str
     question: str
     option_a: str
     option_b: str
@@ -50,6 +51,7 @@ class VibeMatchResult(BaseModel):
     daily_match_percent: float
     cumulative_match_percent: float
     matched_answers: List[VibeMatchedAnswer]
+    both_finished: bool = False
 
 class VibeMultiMatchResult(BaseModel):
     success: bool
@@ -58,7 +60,7 @@ class VibeMultiMatchResult(BaseModel):
 class VibeStreakResponse(BaseModel):
     current_streak: int
     last_answered: Optional[datetime] = None
-    is_answered_today: bool
+    cards_answered_today: int = 0
 
 class GenericResponse(BaseModel):
     success: bool

@@ -4,7 +4,7 @@ from app.schemas.auth import (
     SignupRequest, VerifyEmailRequest, ResendOtpRequest,
     SigninRequest, OAuthRequest, RefreshRequest,
     ForgotPasswordRequest, ResetPasswordRequest, ChangePasswordRequest,
-    TokenResponse, UserMeResponse
+    TokenResponse, UserMeResponse, DeleteAccountRequest
 )
 from app.services.auth import auth_service, decode_token
 from app.services.relationships import relationship_service
@@ -182,15 +182,20 @@ async def forgot_password(payload: ForgotPasswordRequest):
             detail=f"An error occurred: {str(e)}"
         )
 
-@router.post("/reset-password")
+@router.post("/reset-password", response_model=TokenResponse)
 async def reset_password(payload: ResetPasswordRequest):
-    """Resets the account password using the password reset OTP code."""
+    """Resets the account password using the password reset OTP code and returns access tokens."""
     try:
         await auth_service.reset_password(payload)
-        return {
-            "success": True,
-            "message": "Password reset successfully! You can now login with your new password."
-        }
+        
+        # Automatically log the user in after reset
+        signin_req = SigninRequest(email=payload.email, password=payload.new_password)
+        result = await auth_service.signin(signin_req)
+        
+        return TokenResponse(
+            access_token=result["access_token"],
+            refresh_token=result["refresh_token"]
+        )
     except ValueError as ve:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve))
     except Exception as e:
@@ -230,15 +235,20 @@ async def get_me(current_user: dict = Depends(get_current_user)):
     
     return current_user
 
-@router.delete("/me")
-async def delete_me(current_user: dict = Depends(get_current_user)):
+@router.post("/delete-account")
+async def delete_me(payload: DeleteAccountRequest, current_user: dict = Depends(get_current_user)):
     """Deletes current authenticated user's account from the database."""
     try:
-        await auth_service.delete_user(current_user["id"])
+        await auth_service.delete_user(current_user["id"], payload.password)
         return {
             "success": True,
             "message": "Account successfully deleted."
         }
+    except ValueError as ve:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(ve)
+        )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
