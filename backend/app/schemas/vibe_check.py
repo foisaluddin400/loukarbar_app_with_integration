@@ -22,6 +22,7 @@ class VibeCheckProfileResponse(BaseModel):
     updated_at: datetime
 
 class PartnerStats(BaseModel):
+    user_id: str
     name: str
     match_percentage: float
     streak_days: int

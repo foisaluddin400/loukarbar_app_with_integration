@@ -4,12 +4,12 @@ import {
   ScrollView,
   StyleSheet,
   Pressable,
-  SafeAreaView,
   Alert,
   Image,
   ActivityIndicator,
   Platform,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { Colors } from '../../constants/colors';
@@ -26,6 +26,8 @@ import {
   deleteVibeProfile,
   regenerateKey,
 } from '../../services/vibeCheckApi';
+import { signoutUser } from '../../services/authApi';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import * as Clipboard from 'expo-clipboard';
 import QRCode from 'react-native-qrcode-svg';
@@ -217,6 +219,23 @@ export const VCProfileScreen: React.FC = () => {
     }
   };
 
+  const handleSignout = async () => {
+    Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Sign Out', style: 'destructive', onPress: async () => {
+          try {
+            setLoading(true);
+            await signoutUser().catch(() => {});
+            await AsyncStorage.multiRemove(['access_token', 'refresh_token']);
+            nav.reset({ index: 0, routes: [{ name: 'ModeSelector' }] });
+          } catch (e) {
+             Alert.alert('Error', 'Failed to sign out locally.');
+             setLoading(false);
+          }
+      }}
+    ]);
+  };
+
   // ─── Render ────────────────────────────────────────────────
 
   if (loading) {
@@ -349,6 +368,16 @@ export const VCProfileScreen: React.FC = () => {
               <AppText variant="heading" size={17}>Profile picture</AppText>
               <AppText variant="mono" color={Colors.muted} style={{ fontSize: 10, marginTop: 2 }}>
                 {profilePictureUrl ? 'UPDATE OR REMOVE' : 'ADD A PHOTO'}
+              </AppText>
+            </View>
+            <AppText color={Colors.accent}>→</AppText>
+          </Pressable>
+
+          <Pressable style={styles.menuItem} onPress={handleSignout}>
+            <View>
+              <AppText variant="heading" size={17}>Sign out</AppText>
+              <AppText variant="mono" color={Colors.muted} style={{ fontSize: 10, marginTop: 2 }}>
+                LOG OUT OF YOUR ACCOUNT
               </AppText>
             </View>
             <AppText color={Colors.accent}>→</AppText>

@@ -11,16 +11,19 @@ interface Props {
   revealed: boolean;
   partnerName: string;
   onPick: (pick: 'a' | 'b') => void;
+  allPartnerPicks?: { name: string, pick: 'a' | 'b' }[];
 }
 
 export const ThisOrThatCard: React.FC<Props> = ({
-  card, myPick, theirPick, revealed, partnerName, onPick,
+  card, myPick, theirPick, revealed, partnerName, onPick, allPartnerPicks
 }) => (
   <View style={styles.row}>
     {(['a', 'b'] as const).map(opt => {
       const isMine = myPick === opt;
       const isTheirs = revealed && theirPick === opt;
       const both = isMine && isTheirs;
+      
+      const picksForThisOpt = allPartnerPicks?.filter(p => p.pick === opt) || [];
 
       return (
         <Pressable
@@ -41,20 +44,20 @@ export const ThisOrThatCard: React.FC<Props> = ({
           >
             {card[opt]}
           </AppText>
-          {revealed && (isMine || isTheirs) && (
+          {revealed && (isMine || picksForThisOpt.length > 0) && (
             <View style={styles.badges}>
               {isMine && (
                 <View style={[styles.badge, both ? styles.badgeWhite : styles.badgeAccent]}>
                   <AppText variant="mono" style={{ fontSize: 9 }} color={both ? Colors.accent : Colors.bone}>YOU</AppText>
                 </View>
               )}
-              {isTheirs && !both && (
-                <View style={styles.badgeAccent}>
-                  <AppText variant="mono" style={{ fontSize: 9 }} color={Colors.bone}>
-                    {partnerName.toUpperCase().slice(0, 6)}
+              {picksForThisOpt.map((p, idx) => (
+                <View key={idx} style={both ? styles.badgeWhite : styles.badgeAccent}>
+                  <AppText variant="mono" style={{ fontSize: 9 }} color={both ? Colors.accent : Colors.bone}>
+                    {p.name.toUpperCase().slice(0, 6)}
                   </AppText>
                 </View>
-              )}
+              ))}
             </View>
           )}
         </Pressable>

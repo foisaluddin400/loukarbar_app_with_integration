@@ -24,7 +24,11 @@ const API_BASE = 'http://localhost:8006';
 
 type Nav = StackNavigationProp<RootStackParamList>;
 
-const SamVibeNav: React.FC = () => {
+interface SamVibeNavProps {
+  onPartnerChange?: (partnerId: string) => void;
+}
+
+const SamVibeNav: React.FC<SamVibeNavProps> = ({ onPartnerChange }) => {
   const navigation = useNavigation<Nav>();
   const [settingsSheet, setSettingsSheet] = useState(false);
   const [inviteSheet, setInviteSheet] = useState(false);
@@ -58,8 +62,14 @@ const SamVibeNav: React.FC = () => {
         getRequests().catch(() => ({ data: [] })),
       ]);
       if (profileData) setProfile(profileData);
-      setConnections(connectionsData?.data || []);
+      
+      const conns = connectionsData?.data || [];
+      setConnections(conns);
       setRequests(requestsData?.data || []);
+      
+      if (conns.length > 0 && onPartnerChange) {
+         onPartnerChange(conns[0].user_id);
+      }
     } catch (error) {
       console.log("Error fetching vibe data:", error);
     } finally {
@@ -176,7 +186,12 @@ const SamVibeNav: React.FC = () => {
         <AppText variant="display" style={{ fontSize: 25 }}>
           vibe check.
         </AppText>
-        <Pressable onPress={() => navigation.navigate('VibeProfile')}>
+        <Pressable onPress={() => navigation.navigate('VibeProfile')} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          {profile?.name && (
+            <AppText variant="serifItalic" size={16} color={Colors.ink}>
+              {profile.name}
+            </AppText>
+          )}
           {profilePictureUrl ? (
             <Image source={{ uri: profilePictureUrl }} style={styles.navAvatar} />
           ) : (
@@ -537,6 +552,9 @@ const SamVibeNav: React.FC = () => {
                 onPress={() => {
                   setActiveIdx(i);
                   setSwitchSheet(false);
+                  if (onPartnerChange && conn.user_id) {
+                    onPartnerChange(conn.user_id);
+                  }
                 }}
                 onLongPress={() => handleDeleteConnection(conn.user_id, conn.name)}
               >

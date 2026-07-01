@@ -4,10 +4,10 @@ import {
   ScrollView,
   StyleSheet,
   Pressable,
-  SafeAreaView,
   ActivityIndicator,
   TouchableOpacity,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { Colors } from "../../constants/colors";
 import { AppText } from "../../components/ui/AppText";
 import { AppButton } from "../../components/ui/AppButton";
@@ -58,6 +58,7 @@ export const PlayScreen: React.FC = () => {
   const [cardsAnsweredToday, setCardsAnsweredToday] = useState(0);
   const [streak, setStreak] = useState(0);
   const [matchRate, setMatchRate] = useState(0);
+  const [allResults, setAllResults] = useState<any[]>([]);
   
   const [activePartners, setActivePartners] = useState<any[]>([]);
   const [partnerName, setPartnerName] = useState("Partner");
@@ -68,6 +69,7 @@ export const PlayScreen: React.FC = () => {
   const [myPick, setMyPick] = useState<"a" | "b" | null>(null);
   const [theirPick, setTheirPick] = useState<"a" | "b" | null>(null);
   const [revealed, setRevealed] = useState(false);
+  const [debugText, setDebugText] = useState("");
   
   // A small local counter so we can show "Card 1 of 3" etc while moving through them
   // This is offset by cardsAnsweredToday on mount.
@@ -98,10 +100,13 @@ export const PlayScreen: React.FC = () => {
             setPartnerId(currentPId);
           }
 
-          // Fetch results specifically for this partner
-          const resultsData = await getVibeResults(currentPId).catch(() => ({ data: [] }));
-          if (resultsData?.data?.length > 0) {
-             setMatchRate(resultsData.data[0]?.cumulative_match_percent || 0);
+          // Fetch results for all partners
+          setAllResults(resultsData?.data || []);
+          
+          // Match rate for currently selected partner
+          const currentPartnerResult = resultsData?.data?.find((r: any) => r.partner_name === currentPName);
+          if (currentPartnerResult) {
+             setMatchRate(currentPartnerResult.cumulative_match_percent || 0);
           }
         }
         
@@ -132,32 +137,45 @@ export const PlayScreen: React.FC = () => {
       const checkPartnerAnswer = async () => {
         if (cancelled) return;
         try {
-          const results = await getVibeResults(currentPartnerId);
+          setDebugText(`Polling... partnerId=${currentPartnerId}`);
+          const results = await getVibeResults();
           if (cancelled) return;
           
-          if (results?.data?.length > 0) {
-            const partnerData = results.data[0];
+          if (results?.data) {
+            setAllResults(results.data);
+            const partnerData = results.data.find((r: any) => r.partner_name === partnerName);
             const matchedAns = partnerData?.matched_answers?.find((a: any) => a.question_id === cardId);
             if (matchedAns && matchedAns.partner_selected_option) {
-              console.log("WS/POLL: Partner answered!", matchedAns.partner_selected_option);
+              setDebugText(`Found answer: ${matchedAns.partner_selected_option}`);
               setTheirPick(matchedAns.partner_selected_option.toLowerCase() as "a" | "b");
               if (interval) clearInterval(interval);
+            } else {
+              setDebugText(`Results fetched, no matchedAns for cardId=${cardId}. answers count: ${partnerData?.matched_answers?.length}`);
             }
+          } else {
+             setDebugText(`Results fetched, but length is 0 (or undefined).`);
           }
-        } catch (e) {
-          console.error("Poll error:", e);
+        } catch (e: any) {
+          setDebugText(`Poll error: ${e.message}`);
         }
       };
       
       // Immediate first check
       checkPartnerAnswer();
       
+      // ALWAYS start polling (as a reliable fallback for ngrok/websocket issues)
+      interval = setInterval(checkPartnerAnswer, 2000);
+      
       // Connect to WebSocket
       const baseUrl = api.defaults.baseURL || "http://localhost:8006";
       const wsUrl = `${baseUrl.replace('http', 'ws')}/vibecheck/cards/ws/${myUserId}`;
       
       try {
-          ws = new WebSocket(wsUrl);
+          ws = new WebSocket(wsUrl, null, {
+            headers: {
+              'ngrok-skip-browser-warning': 'true'
+            }
+          });
 
           ws.onopen = () => {
             console.log("WS Connected:", wsUrl);
@@ -216,12 +234,11 @@ export const PlayScreen: React.FC = () => {
       
       // Check if partner answered
       let foundMatch = false;
-      if (partnerId) {
-          const results = await getVibeResults(partnerId);
-          
-          if (results?.data?.length > 0) {
-              console.log("RESULTS", JSON.stringify(results.data[0]));
-              const partnerData = results.data[0];
+      const results = await getVibeResults();
+      if (results?.data) {
+          setAllResults(results.data);
+          const partnerData = results.data.find((r: any) => r.partner_name === partnerName);
+          if (partnerData) {
               const matchedAns = partnerData.matched_answers?.find((a: any) => a.question_id === card.id);
               if (matchedAns?.partner_selected_option) {
                   setTheirPick(matchedAns.partner_selected_option.toLowerCase() as "a" | "b");
@@ -271,7 +288,12 @@ export const PlayScreen: React.FC = () => {
   return (
     <SafeAreaView style={styles.safe}>
       <ScrollView showsVerticalScrollIndicator={false}>
-        <SamVibeNav />
+        <SamVibeNav 
+          onPartnerChange={(newPartnerId) => {
+            const p = activePartners.find(p => p.user_id === newPartnerId);
+            if (p) handlePartnerSelect(p);
+          }} 
+        />
         {/* Stats strip */}
         <View style={styles.stats1}>
           <View style={styles.stats}>
@@ -388,6 +410,18 @@ export const PlayScreen: React.FC = () => {
                 revealed={revealed}
                 partnerName={partnerName}
                 onPick={handlePick}
+                allPartnerPicks={allResults
+                  .map((r: any) => {
+                    const matchedAns = r.matched_answers?.find((a: any) => a.question_id === card.id);
+                    if (matchedAns && matchedAns.partner_selected_option) {
+                      return {
+                        name: r.partner_name,
+                        pick: matchedAns.partner_selected_option.toLowerCase() as "a" | "b"
+                      };
+                    }
+                    return null;
+                  })
+                  .filter(Boolean)}
               />
 
               {/* Status */}
@@ -415,68 +449,63 @@ export const PlayScreen: React.FC = () => {
                 </AppText>
               )}
               {revealed && (
-                <View style={{ marginBottom: 24 }}>
-                  <View
-                    style={[
-                      styles.resultCard,
-                      theirPick === null ? styles.resultDiffer : (matched ? styles.resultMatch : styles.resultDiffer),
-                    ]}
-                  >
-                    {theirPick === null ? (
-                        <>
-                            <AppText variant="display" size={32} color={Colors.ink} style={{ lineHeight: 36, textAlign: 'center' }}>
-                                Waiting for <AppText variant="serifItalic" size={32} color={Colors.accent}>{partnerName}</AppText>
-                            </AppText>
-                            <AppText variant="serifItalic" size={14} color={Colors.muted} style={{ marginTop: 6, textAlign: 'center' }}>
-                                We'll let you know when they answer.
-                            </AppText>
-                        </>
-                    ) : (
-                        <>
-                            <AppText
-                                variant="display"
-                                size={32}
-                                color={matched ? Colors.sage : Colors.ink}
-                                style={{ lineHeight: 36 }}
-                            >
-                            {matched ? (
-                                <>
-                                You{" "}
-                                <AppText
-                                    variant="serifItalic"
-                                    size={32}
-                                    color={Colors.sage}
-                                >
-                                    matched.
-                                </AppText>
-                                </>
-                            ) : (
-                                <>
-                                You{" "}
-                                <AppText
-                                    variant="serifItalic"
-                                    size={32}
-                                    color={Colors.accent}
-                                >
-                                    differ.
-                                </AppText>
-                                </>
-                            )}
-                            </AppText>
-                            <AppText
-                                variant="serifItalic"
-                                size={14}
-                                color={Colors.muted}
-                                style={{ marginTop: 6 }}
-                            >
-                            {matched
-                                ? "Same energy."
-                                : "Worth a second look — or a laugh."}
-                            </AppText>
-                        </>
-                    )}
-                  </View>
-                  <AppButton full variant="solid" size="lg" onPress={nextCard}>
+                <View style={{ marginBottom: 24, gap: 12 }}>
+                  {activePartners.map((partner) => {
+                      const pPickData = allResults
+                        .map((r: any) => {
+                          const matchedAns = r.matched_answers?.find((a: any) => a.question_id === card.id);
+                          if (matchedAns && matchedAns.partner_selected_option) {
+                            return {
+                              name: r.partner_name,
+                              pick: matchedAns.partner_selected_option.toLowerCase() as "a" | "b"
+                            };
+                          }
+                          return null;
+                        })
+                        .filter(Boolean)
+                        ?.find(p => p?.name === partner.name);
+                      
+                      if (!pPickData) {
+                          return (
+                              <View key={partner.user_id} style={[styles.resultCard, styles.resultDiffer]}>
+                                  <AppText variant="display" size={24} color={Colors.ink} style={{ lineHeight: 28, textAlign: 'center' }}>
+                                      Waiting for <AppText variant="serifItalic" size={24} color={Colors.accent}>{partner.name}</AppText>
+                                  </AppText>
+                                  <AppText variant="serifItalic" size={14} color={Colors.muted} style={{ marginTop: 6, textAlign: 'center' }}>
+                                      We'll let you know when they answer.
+                                  </AppText>
+                              </View>
+                          );
+                      }
+                      
+                      const pMatched = pPickData.pick === myPick;
+                      return (
+                          <View key={partner.user_id} style={[styles.resultCard, pMatched ? styles.resultMatch : styles.resultDiffer]}>
+                              <AppText
+                                  variant="display"
+                                  size={24}
+                                  color={pMatched ? Colors.sage : Colors.ink}
+                                  style={{ lineHeight: 28, textAlign: 'center' }}
+                              >
+                                  You {pMatched ? (
+                                      <AppText variant="serifItalic" size={24} color={Colors.sage}>matched</AppText>
+                                  ) : (
+                                      <AppText variant="serifItalic" size={24} color={Colors.accent}>differ</AppText>
+                                  )} with {partner.name}.
+                              </AppText>
+                              <AppText
+                                  variant="serifItalic"
+                                  size={14}
+                                  color={Colors.muted}
+                                  style={{ marginTop: 6, textAlign: 'center' }}
+                              >
+                                  {pMatched ? "Same energy." : "Worth a second look — or a laugh."}
+                              </AppText>
+                          </View>
+                      );
+                  })}
+                  
+                  <AppButton full variant="solid" size="lg" onPress={nextCard} style={{ marginTop: 12 }}>
                     Next card →
                   </AppButton>
                 </View>
@@ -531,12 +560,14 @@ export const PlayScreen: React.FC = () => {
             One card a day. Build the streak.
           </AppText>
           <AppButton
-            variant="solid"
-            size="lg"
-            onPress={() => navigation.navigate("Profile")}
+            variant="outline"
+            size="md"
+            style={{ marginTop: 20 }}
+            onPress={() => navigation.navigate("History")}
           >
-            Leave Game →
+            View History
           </AppButton>
+
 
           <View style={{ height: 80 }} />
         </View>

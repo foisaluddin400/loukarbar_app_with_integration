@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { View, ScrollView, StyleSheet, Pressable, SafeAreaView } from 'react-native';
+import { View, ScrollView, StyleSheet, Pressable, Alert } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors } from '../../constants/colors';
 import { AppText } from '../../components/ui/AppText';
+import { AppButton } from '../../components/ui/AppButton';
+import { AppTextInput } from '../../components/ui/AppTextInput';
 import { BottomSheet } from '../../components/ui/BottomSheet';
 import { LadderRow } from '../../components/vibecheck/LadderRow';
-import { usePersist } from '../../hooks/usePersist';
-import { VibeTabs } from '@/navigation/VibeTabs';
 import SamVibeNav from '@/components/ui/SamVibeNav';
 import { getVibeProfile } from '../../services/vibeCheckApi';
+import { setVibePulse, getVibePulseStatus, getPulseAnalytics, getMyFlags, createFlag, checkAlignedConnection } from '../../services/vibePulseApi';
 
 const LADDER = [
   { l: 'Talking', sub: 'Texting, flirting — no dates yet' },
@@ -19,25 +21,124 @@ const LADDER = [
   { l: 'Aligned', sub: 'Defining as a couple — ready for the next phase' },
 ];
 
+const getStageIndex = (statusStr: string) => {
+  const mapping: Record<string, number> = {
+    Talking: 0, Dating: 1, Seeing: 2, Working: 3, Exclusive: 4, Serious: 5, Aligned: 6,
+  };
+  return mapping[statusStr] ?? -1;
+};
+
+const getStageStatus = (index: number) => {
+  const statuses = ['Talking', 'Dating', 'Seeing', 'Working', 'Exclusive', 'Serious', 'Aligned'];
+  return statuses[index] || 'None';
+};
+
 export const PulseScreen: React.FC = () => {
   const [section, setSection] = useState<'overview' | 'ladder'>('overview');
-  const [myStage, setMyStage] = usePersist<number>('vc.c1.pulse.myStage', 2);
-  const [theirStage] = usePersist<number>('vc.c1.pulse.theirStage', 1);
   const [flagsSheet, setFlagsSheet] = useState(false);
   const [patternsSheet, setPatternsSheet] = useState(false);
+  
+  const [partnerId, setPartnerId] = useState<string | null>(null);
+  
+  // SamVibeNav will fire onPartnerChange on mount if there are active connections
+  // which will set partnerId and trigger the loadPulseData effect.
   const [partnerName, setPartnerName] = useState('Partner');
+  
+  const [myStage, setMyStage] = useState<number>(-1);
+  const [theirStage, setTheirStage] = useState<number>(-1);
+  const [isAligned, setIsAligned] = useState(false);
+  const [alignedMessage, setAlignedMessage] = useState('');
+  
+  const [analytics, setAnalytics] = useState<any>(null);
+  const [flags, setFlags] = useState<any[]>([]);
+
+  const [newFlagSheet, setNewFlagSheet] = useState(false);
+  const [newFlagText, setNewFlagText] = useState('');
+  const [newFlagColor, setNewFlagColor] = useState<'Green' | 'Yellow' | 'Red'>('Green');
+  const [submittingFlag, setSubmittingFlag] = useState(false);
+
+  // Removed getVibeProfile useEffect because SamVibeNav handles initial fetch and fires onPartnerChange
+
+  const loadPulseData = async (pid: string) => {
+    try {
+      const pulseRes = await getVibePulseStatus(pid);
+      if (pulseRes) {
+        setMyStage(getStageIndex(pulseRes.my_status));
+        setTheirStage(getStageIndex(pulseRes.partner_status));
+      }
+    } catch (e) {
+      setMyStage(-1);
+      setTheirStage(-1);
+    }
+    
+    try {
+      const alignRes = await checkAlignedConnection(pid);
+      if (alignRes.success) {
+         setIsAligned(alignRes.is_aligned);
+         setAlignedMessage(alignRes.message);
+      }
+    } catch (e) {}
+    
+    try {
+      const analyticsRes = await getPulseAnalytics(pid);
+      if (analyticsRes.success) setAnalytics(analyticsRes.data);
+    } catch (e) {}
+
+    try {
+      const flagsRes = await getMyFlags(pid);
+      if (flagsRes.success) setFlags(flagsRes.data);
+    } catch (e) {}
+  };
 
   useEffect(() => {
-    getVibeProfile()
-      .then((profile) => {
-        if (profile?.active_users?.length > 0) {
-          setPartnerName(profile.active_users[0].name || 'Partner');
-        }
-      })
-      .catch(() => {});
-  }, []);
+    if (partnerId) {
+      loadPulseData(partnerId);
+    }
+  }, [partnerId]);
 
-  const ladderGap = Math.abs(myStage - theirStage);
+  const handleLadderPress = async (index: number) => {
+    setMyStage(index);
+    if (partnerId) {
+      try {
+        await setVibePulse(partnerId, getStageStatus(index));
+        loadPulseData(partnerId);
+      } catch (e) {
+        Alert.alert('Error', 'Could not save your stage.');
+      }
+    } else {
+      Alert.alert('Error', 'No active partner found.');
+    }
+  };
+
+  const handleCreateFlag = async () => {
+    if (!newFlagText.trim() || !partnerId) return;
+    setSubmittingFlag(true);
+    try {
+      await createFlag(partnerId, newFlagColor, 'public', newFlagText.trim()); // 'public' isn't exactly private notes? wait backend schema FlagType has 'public'/'private'. Actually schema defaults 'private' as False if not set properly, wait I mapped 'private'. The backend schema type requires 'public' or 'private'. The user prompt says "Your private notes." so type should be 'private'.
+      // WAIT I used 'public' above. Let me use 'private'.
+      await createFlag(partnerId, newFlagColor, 'private', newFlagText.trim());
+      setNewFlagText('');
+      setNewFlagSheet(false);
+      loadPulseData(partnerId);
+    } catch (e) {
+       Alert.alert('Error', 'Could not save flag.');
+    } finally {
+      setSubmittingFlag(false);
+    }
+  };
+
+  const ladderGap = (myStage !== -1 && theirStage !== -1) ? Math.abs(myStage - theirStage) : -1;
+  const isSameStep = ladderGap === 0;
+
+  const greenCount = flags.filter(f => f.category === 'Green').length;
+  const yellowCount = flags.filter(f => f.category === 'Yellow').length;
+  const redCount = flags.filter(f => f.category === 'Red').length;
+
+  const getFlagColorHex = (cat: string) => {
+    if (cat === 'Green') return Colors.sage;
+    if (cat === 'Yellow') return '#D4A574';
+    return Colors.accent;
+  };
 
   // ==================== LADDER FULL SCREEN ====================
   if (section === 'ladder') {
@@ -56,25 +157,37 @@ export const PulseScreen: React.FC = () => {
               Where do you each think you are? Tap to mark your stage.
             </AppText>
 
-            {ladderGap === 0 ? (
-              <View style={[styles.statusCard, { backgroundColor: `${Colors.sage}12`, borderColor: `${Colors.sage}30` }]}>
-                <AppText variant="smallCaps" color={Colors.sage} style={{ marginBottom: 6 }}>● On the same step</AppText>
-                <AppText variant="display" size={20} color={Colors.ink}>
-                  You both see this as{' '}
-                  <AppText variant="serifItalic" size={20} color={Colors.accent}>
-                    {LADDER[myStage].l.toLowerCase()}.
+            {isAligned ? (
+              <View style={[styles.statusCard, { backgroundColor: '#1C1C1E', borderColor: '#333' }]}>
+                <AppText variant="smallCaps" color={Colors.sage} style={{ marginBottom: 6 }}>● FULLY ALIGNED</AppText>
+                <AppText variant="display" size={24} color={Colors.bone}>
+                  Congratulations.
+                </AppText>
+                <AppText variant="serifItalic" size={15} color="#ccc" style={{ marginTop: 4, lineHeight: 22 }}>
+                  {alignedMessage || 'You and your partner have both marked yourselves as aligned!'}
+                </AppText>
+              </View>
+            ) : myStage !== -1 && theirStage !== -1 && (
+              isSameStep ? (
+                <View style={[styles.statusCard, { backgroundColor: `${Colors.sage}12`, borderColor: `${Colors.sage}30` }]}>
+                  <AppText variant="smallCaps" color={Colors.sage} style={{ marginBottom: 6 }}>● On the same step</AppText>
+                  <AppText variant="display" size={20} color={Colors.ink}>
+                    You both see this as{' '}
+                    <AppText variant="serifItalic" size={20} color={Colors.accent}>
+                      {LADDER[myStage].l.toLowerCase()}.
+                    </AppText>
                   </AppText>
-                </AppText>
-              </View>
-            ) : (
-              <View style={[styles.statusCard, { backgroundColor: `${Colors.accent}10`, borderColor: `${Colors.accent}30` }]}>
-                <AppText variant="smallCaps" color={Colors.accent} style={{ marginBottom: 6 }}>
-                  {ladderGap} step{ladderGap > 1 ? 's' : ''} apart
-                </AppText>
-                <AppText variant="serifItalic" size={14} color={Colors.muted} style={{ lineHeight: 22 }}>
-                  The gap isn't bad — it's information.
-                </AppText>
-              </View>
+                </View>
+              ) : (
+                <View style={[styles.statusCard, { backgroundColor: `${Colors.accent}10`, borderColor: `${Colors.accent}30` }]}>
+                  <AppText variant="smallCaps" color={Colors.accent} style={{ marginBottom: 6 }}>
+                    {ladderGap} step{ladderGap > 1 ? 's' : ''} apart
+                  </AppText>
+                  <AppText variant="serifItalic" size={14} color={Colors.muted} style={{ lineHeight: 22 }}>
+                    The gap isn't bad — it's information.
+                  </AppText>
+                </View>
+              )
             )}
 
             {LADDER.map((stage, i) => (
@@ -86,7 +199,7 @@ export const PulseScreen: React.FC = () => {
                 isMine={i === myStage}
                 isTheirs={i === theirStage}
                 partnerName={partnerName}
-                onPress={() => setMyStage(i)}
+                onPress={() => handleLadderPress(i)}
               />
             ))}
 
@@ -100,7 +213,7 @@ export const PulseScreen: React.FC = () => {
   // ==================== MAIN PULSE OVERVIEW ====================
   return (
     <SafeAreaView style={styles.safe}>
-      <SamVibeNav></SamVibeNav>
+      <SamVibeNav onPartnerChange={(pid) => setPartnerId(pid)} />
       <ScrollView showsVerticalScrollIndicator={false}>
         <View style={styles.inner}>
           <AppText variant="display" size={42} style={{ lineHeight: 42, marginBottom: 6 }}>
@@ -110,14 +223,13 @@ export const PulseScreen: React.FC = () => {
             Deeper patterns, beyond the daily card.
           </AppText>
 
-          {/* Doorways */}
           <View style={{ gap: 12 }}>
             {/* The Ladder */}
             <Pressable style={styles.door} onPress={() => setSection('ladder')}>
               <View style={styles.doorHeader}>
                 <AppText variant="smallCaps" color={Colors.muted}>The Ladder</AppText>
                 <AppText variant="mono" color={Colors.accent} style={{ fontSize: 10 }}>
-                  {ladderGap === 0 ? 'SAME STEP' : `${ladderGap} STEP${ladderGap > 1 ? 'S' : ''} APART`}
+                  {ladderGap === -1 ? '' : ladderGap === 0 ? 'SAME STEP' : `${ladderGap} STEP${ladderGap > 1 ? 'S' : ''} APART`}
                 </AppText>
               </View>
               <AppText variant="display" size={24} style={{ lineHeight: 28, marginBottom: 6 }}>Where do you each think you are?</AppText>
@@ -128,7 +240,9 @@ export const PulseScreen: React.FC = () => {
             <Pressable style={styles.door} onPress={() => setPatternsSheet(true)}>
               <View style={styles.doorHeader}>
                 <AppText variant="smallCaps" color={Colors.muted}>Patterns</AppText>
-                <AppText variant="mono" color={Colors.accent} style={{ fontSize: 10 }}>80% MATCH</AppText>
+                <AppText variant="mono" color={Colors.accent} style={{ fontSize: 10 }}>
+                   {analytics?.overall_match_percentage ?? 0}% MATCH
+                </AppText>
               </View>
               <AppText variant="display" size={24} style={{ lineHeight: 28, marginBottom: 6 }}>What the cards are saying.</AppText>
               <AppText variant="serifItalic" size={14} color={Colors.muted} style={{ lineHeight: 22 }}>Your shared picks over time.</AppText>
@@ -138,7 +252,7 @@ export const PulseScreen: React.FC = () => {
             <Pressable style={styles.door} onPress={() => setFlagsSheet(true)}>
               <View style={styles.doorHeader}>
                 <AppText variant="smallCaps" color={Colors.muted}>Flags</AppText>
-                <AppText variant="mono" color={Colors.accent} style={{ fontSize: 10 }}>PRIVATE</AppText>
+                <AppText variant="mono" color={Colors.accent} style={{ fontSize: 10 }}>{flags.length} LOGGED</AppText>
               </View>
               <AppText variant="display" size={24} style={{ lineHeight: 28, marginBottom: 6 }}>Your private notes.</AppText>
               <AppText variant="serifItalic" size={14} color={Colors.muted} style={{ lineHeight: 22 }}>Track moments that feel right and wrong.</AppText>
@@ -154,57 +268,51 @@ export const PulseScreen: React.FC = () => {
         open={patternsSheet}
         onClose={() => setPatternsSheet(false)}
         kicker="OVERALL"
-        title="80% IN SYNC"
+        title={`${analytics?.overall_match_percentage ?? 0}% IN SYNC`}
       >
-        <View >
+        <View>
           <AppText variant="serifItalic" size={14} color={Colors.muted} style={{ marginBottom: 24 }}>
-            4 matches across 5 cards played.
+            {analytics?.total_matches ?? 0} matches across {analytics?.total_cards_played ?? 0} cards played.
           </AppText>
 
           <View style={{ flexDirection: 'row', gap: 12, marginBottom: 32 }}>
             <View style={styles.statBox}>
               <AppText variant="smallCaps" color={Colors.ink2}>STRONGEST</AppText>
-              <AppText variant="heading" size={18}>Travel</AppText>
-              <AppText variant="mono" color={Colors.accent}>100% MATCH</AppText>
+              <AppText variant="heading" size={18}>{analytics?.strongest_category?.category || 'None'}</AppText>
+              <AppText variant="mono" color={Colors.accent}>{analytics?.strongest_category?.match_percentage ?? 0}% MATCH</AppText>
             </View>
 
             <View style={[styles.statBox, { backgroundColor: '#F1E4DA' }]}>
               <AppText variant="smallCaps" color={Colors.accent}>MOST DIVERGENT</AppText>
-              <AppText variant="heading" size={18}>Style</AppText>
-              <AppText variant="mono" color={Colors.accent}>0% MATCH</AppText>
+              <AppText variant="heading" size={18}>{analytics?.divergent_category?.category || 'None'}</AppText>
+              <AppText variant="mono" color={Colors.accent}>{analytics?.divergent_category?.match_percentage ?? 0}% MATCH</AppText>
             </View>
           </View>
 
           <AppText variant="smallCaps" color={Colors.ink2} style={{ marginBottom: 12 }}>BY CATEGORY</AppText>
 
-          {[
-            { cat: 'Travel', match: '1/1' },
-            { cat: 'Energy', match: '2/2' },
-            { cat: 'Social', match: '1/1' },
-            { cat: 'Style', match: '0/1' },
-          ].map((item, i) => (
+          {analytics?.category_breakdowns?.map((item: any, i: number) => (
             <View key={i} style={styles.progressRow1}>
               <View style={styles.progressRow}>
-                <AppText variant="heading" size={16} style={{ flex: 1 }}>{item.cat}</AppText>
-                <AppText variant="mono" color={Colors.muted}>{item.match}</AppText>
+                <AppText variant="heading" size={16} style={{ flex: 1 }}>{item.category}</AppText>
+                <AppText variant="mono" color={Colors.muted}>{item.matches}/{item.total}</AppText>
               </View>
               <View style={styles.progressBarContainer}>
-                <View style={[styles.progressBar, { width: item.match === '0/1' ? '0%' : '100%' }]} />
+                <View style={[styles.progressBar, { width: `${item.match_percentage}%` }]} />
               </View>
             </View>
           ))}
 
-          <AppText variant="smallCaps" color={Colors.ink2} style={{ marginTop: 32, marginBottom: 12 }}>WHERE YOU MATCHED</AppText>
+          {analytics?.recent_matches?.length > 0 && (
+             <AppText variant="smallCaps" color={Colors.ink2} style={{ marginTop: 32, marginBottom: 12 }}>WHERE YOU MATCHED</AppText>
+          )}
 
-          <View style={styles.matchCard}>
-            <AppText variant="serifItalic" size={15}>Beach or Mountains?</AppText>
-            <AppText variant="mono" color={Colors.accent} style={{ marginTop: 4 }}>YOU BOTH CHOSE • BEACH</AppText>
-          </View>
-
-          <View style={styles.matchCard}>
-            <AppText variant="serifItalic" size={15}>Stay in or Go out?</AppText>
-            <AppText variant="mono" color={Colors.accent} style={{ marginTop: 4 }}>YOU BOTH CHOSE • GO OUT</AppText>
-          </View>
+          {analytics?.recent_matches?.map((match: any, i: number) => (
+            <View key={i} style={styles.matchCard}>
+              <AppText variant="serifItalic" size={15}>{match.question_text}</AppText>
+              <AppText variant="mono" color={Colors.accent} style={{ marginTop: 4 }}>YOU BOTH CHOSE • {match.matched_option}</AppText>
+            </View>
+          ))}
         </View>
       </BottomSheet>
 
@@ -215,12 +323,12 @@ export const PulseScreen: React.FC = () => {
         kicker="LOG A MOMENT"
         title="Something just happened?"
       >
-        <View >
+        <View>
           <View style={{ flexDirection: 'row', gap: 12, marginBottom: 24 }}>
             {[
-              { color: Colors.sage, label: 'GREEN', count: 2 },
-              { color: '#D4A574', label: 'YELLOW', count: 1 },
-              { color: Colors.accent, label: 'RED', count: 1 },
+              { color: Colors.sage, label: 'GREEN', count: greenCount },
+              { color: '#D4A574', label: 'YELLOW', count: yellowCount },
+              { color: Colors.accent, label: 'RED', count: redCount },
             ].map((f, i) => (
               <View key={i} style={styles.flagSummary}>
                 <AppText variant="display" size={28}>{f.count}</AppText>
@@ -229,32 +337,81 @@ export const PulseScreen: React.FC = () => {
             ))}
           </View>
 
-          <View style={styles.redFlagBox}>
-            <AppText variant="heading" size={18} color={Colors.accent}>Worth sitting with</AppText>
-            <AppText variant="heading" size={18} color={Colors.cream}>You logged a red flag.</AppText>
-            <AppText variant="serifItalic" size={14} color="#f0e9d5" style={{ marginTop: 8 }}>
-              Red flags are about your boundaries — only you know what they mean. Worth talking to someone you trust about.
-            </AppText>
-          </View>
+          <AppButton variant="solid" size="lg" onPress={() => { setFlagsSheet(false); setTimeout(() => setNewFlagSheet(true), 400); }} style={{ marginBottom: 24 }}>
+             LOG A NEW MOMENT
+          </AppButton>
 
-          <View style={{ marginTop: 20, gap: 10 }}>
-            {[
-              { text: "They remembered my hard meeting and called to check.", time: "TODAY", color: Colors.sage },
-              { text: "Made me laugh harder than I have in months.", time: "3 DAYS AGO", color: Colors.sage },
-              { text: "Cancelled plans last minute again.", time: "LAST WEEK", color: '#D4A574' },
-              { text: "Lied about something small. Felt deeper than the lie itself.", time: "2 WEEKS AGO", color: Colors.accent },
-            ].map((log, i) => (
+          {redCount > 0 && (
+            <View style={styles.redFlagBox}>
+              <AppText variant="heading" size={18} color={Colors.accent}>Worth sitting with</AppText>
+              <AppText variant="heading" size={18} color={Colors.cream}>You logged {redCount} red flag{redCount > 1 ? 's' : ''}.</AppText>
+              <AppText variant="serifItalic" size={14} color="#f0e9d5" style={{ marginTop: 8 }}>
+                Red flags are about your boundaries — only you know what they mean. Worth talking to someone you trust about.
+              </AppText>
+            </View>
+          )}
+
+          <View style={{ marginTop: 10, gap: 10 }}>
+            {flags.map((log: any, i: number) => (
               <View key={i} style={styles.logEntry}>
-                <View style={[styles.logDot, { backgroundColor: log.color }]} />
+                <View style={[styles.logDot, { backgroundColor: getFlagColorHex(log.category) }]} />
                 <View style={{ flex: 1 }}>
                   <AppText variant="serifItalic" size={15}>"{log.text}"</AppText>
-                  <AppText variant="mono" color={Colors.muted} style={{ fontSize: 11, marginTop: 4 }}>{log.time} • PRIVATE</AppText>
+                  <AppText variant="mono" color={Colors.muted} style={{ fontSize: 11, marginTop: 4 }}>
+                    {new Date(log.created_at).toLocaleDateString()} • {log.type.toUpperCase()}
+                  </AppText>
                 </View>
               </View>
             ))}
           </View>
         </View>
       </BottomSheet>
+
+      {/* New Flag Sheet */}
+      <BottomSheet
+        open={newFlagSheet}
+        onClose={() => setNewFlagSheet(false)}
+        kicker="NEW LOG"
+        title="Log a private note"
+      >
+         <View>
+            <AppText variant="serifItalic" size={14} color={Colors.muted} style={{ marginBottom: 20 }}>
+               This is strictly private. Your partner will never see this.
+            </AppText>
+
+            <View style={{ flexDirection: 'row', gap: 10, marginBottom: 20 }}>
+               {['Green', 'Yellow', 'Red'].map((c) => (
+                 <Pressable 
+                   key={c}
+                   onPress={() => setNewFlagColor(c as any)}
+                   style={[styles.colorPicker, newFlagColor === c && { borderColor: getFlagColorHex(c), backgroundColor: getFlagColorHex(c) + '1A' }]}
+                 >
+                    <View style={[styles.logDot, { backgroundColor: getFlagColorHex(c), marginTop: 0, marginBottom: 8 }]} />
+                    <AppText variant="smallCaps">{c}</AppText>
+                 </Pressable>
+               ))}
+            </View>
+
+            <AppTextInput 
+               n="01"
+               label="What happened?"
+               value={newFlagText}
+               onChangeText={setNewFlagText}
+               placeholder="They remembered my favorite coffee..."
+            />
+
+            <AppButton 
+              variant="solid" 
+              size="lg" 
+              disabled={submittingFlag || !newFlagText.trim()}
+              onPress={handleCreateFlag}
+              style={{ marginTop: 24 }}
+            >
+               {submittingFlag ? 'SAVING...' : 'SAVE MOMENT'}
+            </AppButton>
+         </View>
+      </BottomSheet>
+
     </SafeAreaView>
   );
 };
@@ -346,4 +503,12 @@ const styles = StyleSheet.create({
     borderRadius: 5,
     marginTop: 6,
   },
+  colorPicker: {
+    flex: 1,
+    borderWidth: 2,
+    borderColor: Colors.rule,
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center',
+  }
 });

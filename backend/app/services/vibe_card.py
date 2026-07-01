@@ -24,7 +24,10 @@ class VibeCardService:
         self.user_streaks = self.db["vibe_user_streaks"]
 
     async def init_indexes(self):
-        await self.daily_pool.create_index("date", unique=True)
+        try:
+            await self.daily_pool.create_index("date", unique=True)
+        except Exception as e:
+            print(f"Warning: Failed to create unique index on daily_pool 'date': {e}")
         await self.user_answers.create_index([("user_id", 1), ("date", 1)], unique=True)
         await self.cumulative_scores.create_index([("user_id", 1), ("partner_id", 1)], unique=True)
         await self.user_streaks.create_index("user_id", unique=True)

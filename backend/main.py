@@ -35,6 +35,7 @@ origins = [
     "http://localhost:4003",
     "http://127.0.0.1:4002",
     "http://127.0.0.1:4003",
+    "http://localhost:8082",
 ]
 
 if settings.FRONTEND_URL:
