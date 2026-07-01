@@ -171,11 +171,10 @@ async def forgot_password(payload: ForgotPasswordRequest):
             "message": "If the email exists, a password reset OTP code has been sent."
         }
     except ValueError as ve:
-        # Avoid user enumeration by returning a success message even if not found
-        return {
-            "success": True,
-            "message": "If the email exists, a password reset OTP code has been sent."
-        }
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Account not found, create a new account."
+        )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

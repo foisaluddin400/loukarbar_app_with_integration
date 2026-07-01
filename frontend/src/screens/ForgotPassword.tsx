@@ -24,7 +24,18 @@ const ForgotPassword = () => {
       navigation.navigate('ResetPassword', { email });
     } catch (error: any) {
       const errorMessage = error.response?.data?.detail || error.message || 'An error occurred.';
-      Alert.alert('Request Failed', errorMessage);
+      if (error.response?.status === 404 || errorMessage.toLowerCase().includes('account not found')) {
+         Alert.alert(
+           'Account Not Found', 
+           'No account exists with this email address. Would you like to create a new account?',
+           [
+             { text: 'Try Again', style: 'cancel' },
+             { text: 'Sign Up', onPress: () => navigation.navigate('Signup' as any) }
+           ]
+         );
+      } else {
+         Alert.alert('Request Failed', errorMessage);
+      }
     } finally {
       setLoading(false);
     }
