@@ -1,103 +1,112 @@
 import { SafeAreaView } from 'react-native-safe-area-context';
-import React, { useState } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { View, ScrollView, StyleSheet, Pressable } from 'react-native';
 import { Colors } from "../../constants/colors";
 import { AppText } from "../../components/ui/AppText";
 import { AppButton } from "../../components/ui/AppButton";
 import { ActivityCard } from "../../components/connect/ActivityCard";
 import { BottomSheet } from "../../components/ui/BottomSheet";
-import { usePersist } from "../../hooks/usePersist";
-import { Activity } from "../../types";
 import Moment from "./Moment";
 import { AppTextInput } from "@/components/ui/AppTextInput";
 import AlignedNav from "@/components/ui/AlignedNav";
 
-const SEED_ACTIVITIES: Activity[] = [
-  {
-    id: 1,
-    label: "Cook the Same Recipe",
-    duration: "1 hr",
-    description:
-      "Both cook Marcella Hazan's tomato butter pasta — compare photos.",
-    cat: "cooking",
-    status: "active",
-    louDone: true,
-    amandaDone: false,
-    mark: "◈",
-    createdAt: new Date().toISOString(),
-  },
-];
-
-const LIBRARY = [
-  {
-    label: "Morning Workout",
-    duration: "30 min",
-    description: "Same workout, different cities. Share your screen after.",
-    cat: "movement",
-    mark: "✧",
-  },
-  {
-    label: "Sunrise Walk",
-    duration: "30 min",
-    description: "Each take a walk at sunrise. Send photos of what you see.",
-    cat: "movement",
-    mark: "✧",
-  },
-  {
-    label: "Movie Watch Party",
-    duration: "2 hrs",
-    description: "Sync a movie. Hit play together.",
-    cat: "cozy",
-    mark: "◐",
-  },
-  {
-    label: "Make a Playlist",
-    duration: "30 min",
-    description: "Each add 5 songs that capture this week.",
-    cat: "creative",
-    mark: "❦",
-  },
-];
+import { getBrowseIdeas, getActiveIdeas, getCategories, createPersonalizedIdea, selectIdea, markIdeaDone } from "../../services/ideasApi";
 
 export const ConnectScreen: React.FC = () => {
-    const [filter, setFilter] = useState<string>('all');
-  const [activities, setActivities] = usePersist<Activity[]>(
-    "connect.acts",
-    SEED_ACTIVITIES,
-    
-  );
-  const TYPES = ['⟡ All', '✧ movement', '◈ cooking', ' ◇ Adventure', '◐ Cozy', '❦ Creative'] as const
-
-  
-
-  const [mood, setMood] = useState("INTIMATE");
+  const [filter, setFilter] = useState<string>('all');
   const [tab, setTab] = useState<"yours" | "browse">("yours");
   const [sheet, setSheet] = useState<string | null>(null);
-  const [selected, setSelected] = useState<Activity | null>(null);
-  const moods = [
-    "✧ Movement",
-    "◈ Cooking",
-    "◇ Adventure",
-    "◐ Cozy",
-    "❦ Creative",
-  ];
-  const fresh = activities.filter((a) => {
-    if (!a.createdAt) return false;
-    return Date.now() - new Date(a.createdAt).getTime() < 86_400_000;
-  });
+  const [selected, setSelected] = useState<any | null>(null);
 
-  const addFromLibrary = (item: (typeof LIBRARY)[0]) => {
-    const newAct: Activity = {
-      id: Date.now(),
-      ...item,
-      status: "pending",
-      louDone: false,
-      amandaDone: false,
-      createdAt: new Date().toISOString(),
-    };
-    setActivities((p) => [...p, newAct]);
-    setTab("yours");
+  // API State
+  const [activeIdeas, setActiveIdeas] = useState<any[]>([]);
+  const [browseIdeas, setBrowseIdeas] = useState<any[]>([]);
+  const [categories, setCategories] = useState<string[]>(['all', 'movement', 'cooking', 'adventure', 'cozy', 'creative']);
+  
+  // New Idea Form State
+  const [newName, setNewName] = useState("");
+  const [newTime, setNewTime] = useState("");
+  const [newTagline, setNewTagline] = useState("");
+  const [newCat, setNewCat] = useState("creative");
+
+  const loadData = useCallback(async () => {
+    try {
+      if (tab === "yours") {
+        const res = await getActiveIdeas();
+        if (res.success) setActiveIdeas(res.data);
+      } else {
+        const res = await getBrowseIdeas();
+        if (res.success) setBrowseIdeas(res.data);
+        const catRes = await getCategories();
+        if (catRes.success) setCategories(["all", ...catRes.data]);
+      }
+    } catch (e) {
+      console.log(e);
+    }
+  }, [tab]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  const addFromLibrary = async (ideaId: string) => {
+    try {
+      await selectIdea(ideaId);
+      setTab("yours");
+    } catch (e) {
+      console.log("Failed to select idea", e);
+    }
   };
+
+  const handleProposeNew = async () => {
+    if (!newName || !newTime || !newTagline) return;
+    try {
+      await createPersonalizedIdea({
+        name: newName,
+        time: newTime,
+        tagline: newTagline,
+        category: newCat
+      });
+      setSheet(null);
+      setTab("browse");
+      setNewName("");
+      setNewTime("");
+      setNewTagline("");
+    } catch (e) {
+      console.log("Failed to create idea", e);
+    }
+  };
+
+  const toggleDone = async (progressId: string) => {
+    try {
+      await markIdeaDone(progressId);
+      loadData();
+      if (selected) {
+        setSelected({ ...selected, is_done_user: !selected.is_done_user });
+      }
+    } catch (e) {
+      console.log("Failed to mark done", e);
+    }
+  };
+
+  const mapProgressToActivity = (progress: any) => {
+    return {
+      id: progress.id,
+      label: progress.name,
+      duration: progress.time,
+      description: progress.tagline,
+      cat: progress.category,
+      status: progress.is_completed ? 'completed' : 
+             (progress.is_accepted_user && progress.is_accepted_partner) ? 'active' : 'pending',
+      louDone: progress.is_done_user,
+      amandaDone: progress.is_done_partner,
+      mark: "✧",
+      createdAt: progress.created_at,
+      originalProgress: progress
+    };
+  };
+
+  const filteredBrowse = filter === "all" ? browseIdeas : browseIdeas.filter(i => i.category.toLowerCase() === filter.toLowerCase());
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -147,7 +156,7 @@ export const ConnectScreen: React.FC = () => {
           <View style={styles.tabRow}>
             {(
               [
-                { k: "yours", l: `Yours (${fresh.length})` },
+                { k: "yours", l: `Yours (${activeIdeas.length})` },
                 { k: "browse", l: "Browse Ideas" },
               ] as const
             ).map((t) => (
@@ -169,7 +178,7 @@ export const ConnectScreen: React.FC = () => {
 
           {tab === "yours" && (
             <>
-              {fresh.length === 0 ? (
+              {activeIdeas.length === 0 ? (
                 <View style={styles.emptyState}>
                   <AppText
                     variant="serifItalic"
@@ -184,12 +193,12 @@ export const ConnectScreen: React.FC = () => {
                   </AppButton>
                 </View>
               ) : (
-                fresh.map((a) => (
+                activeIdeas.map((progress) => (
                   <ActivityCard
-                    key={a.id}
-                    activity={a}
+                    key={progress.id}
+                    activity={mapProgressToActivity(progress)}
                     onPress={() => {
-                      setSelected(a);
+                      setSelected(progress);
                       setSheet("detail");
                     }}
                   />
@@ -213,35 +222,35 @@ export const ConnectScreen: React.FC = () => {
 
           {tab === "browse" && (
             <>
-            <View style={{ flexDirection: 'row', gap: 6 }}>
-              {TYPES.map((t) => (
-                <Pressable key={t} onPress={() => setFilter(t)}>
+            <View style={{ flexDirection: 'row', gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+              {categories.map((c) => (
+                <Pressable key={c} onPress={() => setFilter(c)}>
                   <AppText 
                     variant="smallCaps" 
                     style={{ 
                       paddingHorizontal: 16, 
                       paddingVertical: 8, 
-                      backgroundColor: filter === t ? Colors.ink : Colors.bone,
-                      color: filter === t ? '#fff' : Colors.muted,
+                      backgroundColor: filter === c ? Colors.ink : Colors.bone,
+                      color: filter === c ? '#fff' : Colors.muted,
                       borderRadius: 20,
                       borderWidth: 1,
                       borderColor: Colors.rule,
                     }}
                   >
-                    {t.charAt(0).toUpperCase() + t.slice(1)}
+                    {c.charAt(0).toUpperCase() + c.slice(1)}
                   </AppText>
                 </Pressable>
               ))}
             </View>
-              {LIBRARY.map((item, i) => (
+              {filteredBrowse.map((idea) => (
                 <Pressable
-                  key={i}
+                  key={idea.id}
                   style={styles.libraryCard}
-                  onPress={() => addFromLibrary(item)}
+                  onPress={() => addFromLibrary(idea.id)}
                 >
                   <View style={styles.libIcon}>
                     <AppText size={20} color={Colors.accent}>
-                      {item.mark}
+                      ✧
                     </AppText>
                   </View>
                   <View style={{ flex: 1 }}>
@@ -253,14 +262,14 @@ export const ConnectScreen: React.FC = () => {
                       }}
                     >
                       <AppText variant="heading" size={16}>
-                        {item.label}
+                        {idea.name}
                       </AppText>
                       <AppText
                         variant="mono"
                         color={Colors.light}
                         style={{ fontSize: 9 }}
                       >
-                        {item.duration.toUpperCase()}
+                        {idea.time.toUpperCase()}
                       </AppText>
                     </View>
                     <AppText
@@ -269,7 +278,7 @@ export const ConnectScreen: React.FC = () => {
                       color={Colors.muted}
                       style={{ lineHeight: 19 }}
                     >
-                      {item.description}
+                      {idea.tagline}
                     </AppText>
                   </View>
                   <AppText
@@ -296,7 +305,7 @@ export const ConnectScreen: React.FC = () => {
       <BottomSheet
         open={sheet === "detail" && !!selected}
         onClose={() => setSheet(null)}
-        title={selected?.label ?? ""}
+        title={selected?.name ?? ""}
         kicker="ACTIVITY"
       >
         {selected && (
@@ -307,74 +316,47 @@ export const ConnectScreen: React.FC = () => {
               color={Colors.ink2}
               style={{ lineHeight: 26, marginBottom: 22 }}
             >
-              {selected.description}
+              {selected.tagline}
             </AppText>
-            {selected.status === "pending" && (
-              <AppButton
-                full
-                variant="accent"
-                size="lg"
-                onPress={() => {
-                  setActivities((p) =>
-                    p.map((a) =>
-                      a.id === selected.id ? { ...a, status: "active" } : a,
-                    ),
-                  );
-                  setSheet(null);
-                }}
+            
+            <>
+              <AppText
+                variant="smallCaps"
+                color={Colors.muted}
+                style={{ marginBottom: 12 }}
               >
-                Start together →
-              </AppButton>
-            )}
-            {selected.status === "active" && (
-              <>
-                <AppText
-                  variant="smallCaps"
-                  color={Colors.muted}
-                  style={{ marginBottom: 12 }}
-                >
-                  Mark done
-                </AppText>
-                <View style={{ flexDirection: "row", gap: 10 }}>
-                  {(["lou", "amanda"] as const).map((u) => {
-                    const isDone =
-                      u === "lou" ? selected.louDone : selected.amandaDone;
-                    return (
-                      <Pressable
-                        key={u}
-                        style={[styles.doneBtn, isDone && styles.doneBtnActive]}
-                        onPress={() => {
-                          const upd =
-                            u === "lou"
-                              ? { ...selected, louDone: !selected.louDone }
-                              : {
-                                  ...selected,
-                                  amandaDone: !selected.amandaDone,
-                                };
-                          setSelected(upd);
-                          setActivities((p) =>
-                            p.map((a) => (a.id === selected.id ? upd : a)),
-                          );
-                        }}
+                Mark done
+              </AppText>
+              <View style={{ flexDirection: "row", gap: 10 }}>
+                {["you", "partner"].map((u) => {
+                  const isDone = u === "you" ? selected.is_done_user : selected.is_done_partner;
+                  const isInteractive = u === "you";
+                  return (
+                    <Pressable
+                      key={u}
+                      style={[styles.doneBtn, isDone && styles.doneBtnActive]}
+                      onPress={() => {
+                        if (isInteractive) toggleDone(selected.id);
+                      }}
+                    >
+                      <AppText
+                        variant="smallCaps"
+                        color={isDone ? Colors.bone : Colors.muted}
                       >
-                        <AppText
-                          variant="smallCaps"
-                          color={isDone ? Colors.bone : Colors.muted}
-                        >
-                          {u.toUpperCase()}
-                        </AppText>
-                        <AppText
-                          size={22}
-                          color={isDone ? Colors.bone : Colors.light}
-                        >
-                          {isDone ? "✓" : "○"}
-                        </AppText>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-              </>
-            )}
+                        {u === "you" ? "YOU" : "PARTNER"}
+                      </AppText>
+                      <AppText
+                        size={22}
+                        color={isDone ? Colors.bone : Colors.light}
+                      >
+                        {isDone ? "✓" : "○"}
+                      </AppText>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </>
+            
           </>
         )}
       </BottomSheet>
@@ -386,14 +368,15 @@ export const ConnectScreen: React.FC = () => {
         kicker="NEW"
         title="Suggest an activity"
       >
-        <AppTextInput label="Name" n="01" placeholder="Morning Walk" />
+        <AppTextInput label="Name" n="01" placeholder="Morning Walk" value={newName} onChangeText={setNewName} />
 
-        <AppTextInput label="Duration" n="02" placeholder="30 min" />
+        <AppTextInput label="Duration" n="02" placeholder="30 min" value={newTime} onChangeText={setNewTime} />
 
         <AppTextInput
           label="Description"
           n="03"
           placeholder="What you'll do together"
+          value={newTagline} onChangeText={setNewTagline}
         />
         <AppText
           variant="smallCaps"
@@ -403,20 +386,20 @@ export const ConnectScreen: React.FC = () => {
           04 Category
         </AppText>
         <View style={styles.chipRow}>
-          {moods.map((m) => (
+          {categories.filter(c => c !== 'all').map((m) => (
             <Pressable
               key={m}
-              style={[styles.chip, mood === m && styles.chipSelected]}
-              onPress={() => setMood(m)}
+              style={[styles.chip, newCat === m && styles.chipSelected]}
+              onPress={() => setNewCat(m)}
             >
               <AppText
                 variant="smallCaps"
                 style={{
-                  color: mood === m ? "#e7e3e3" : Colors.muted,
+                  color: newCat === m ? "#e7e3e3" : Colors.muted,
                   fontSize: 9,
                 }}
               >
-                {m}
+                {m.toUpperCase()}
               </AppText>
             </Pressable>
           ))}
@@ -426,7 +409,7 @@ export const ConnectScreen: React.FC = () => {
           full
           variant="solid"
           size="lg"
-          onPress={() => setSheet(null)}
+          onPress={handleProposeNew}
         >
           Propose →
         </AppButton>

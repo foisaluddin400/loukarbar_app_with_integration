@@ -45,6 +45,7 @@ class RelationshipService:
             "city_name": relationship.city_name,
             "relationship_start_date": relationship.relationship_start_date,
             "is_long_distance": relationship.is_long_distance,
+            "gender": getattr(relationship, "gender", "Not to say"),
             "secret_key": secret_key,
             "is_aligned": False,
             "partner": None

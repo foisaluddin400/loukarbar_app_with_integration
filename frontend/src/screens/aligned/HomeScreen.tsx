@@ -23,14 +23,7 @@ import { completeRitual } from "../../services/ritualApi";
 import { createCheckin, updateCheckin, getCheckin, getQuestionsEndpoint } from "../../services/checkinApi";
 import { getAlignedSyncSummary } from "../../services/userApi";
 
-const MOODS_DESIRE = [
-  { mark: "◯", label: "At peace" },
-  { mark: "◈", label: "Loving" },
-  { mark: "✦", label: "Flirtatious" },
-  { mark: "◆", label: "Passionate" },
-  { mark: "✧", label: "Needing you" },
-  { mark: "·", label: "Thinking of you" },
-];
+import { getMoodList, getCurrentMood, logMood } from "../../services/moodApi";
 
 const RITUAL_BY_TOD: Record<
   string,
@@ -94,10 +87,16 @@ export const HomeScreen: React.FC = () => {
 
   const [activeUser] = useState<"lou" | "amanda">("lou");
   const [sheet, setSheet] = useState<string | null>(null);
-  const [louMood, setLouMood] = usePersist<number>("home.louMood", 1);
-  const [amandaMood, setAmandaMood] = usePersist<number>("home.amandaMood", 3);
   const [weScore, setWeScore] = usePersist<number>("home.weScore", 72);
   const [streak, setStreak] = useState<number>(0);
+  
+  // Mood State
+  const [moodOptions, setMoodOptions] = useState<any[]>([]);
+  const [myMood, setMyMood] = useState<any>(null);
+  const [partnerMood, setPartnerMood] = useState<any>(null);
+  const [partnerName, setPartnerName] = useState<string>("Partner");
+  const [isLoadingMood, setIsLoadingMood] = useState<boolean>(true);
+  const [moodError, setMoodError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [syncData, setSyncData] = useState<any>(null);
 
@@ -174,6 +173,32 @@ export const HomeScreen: React.FC = () => {
       } catch (e) {
         console.log("Error fetching sync summary:", e);
       }
+      
+      try {
+        const moods = await getCurrentMood();
+        if (moods && moods.data) {
+          const mine = moods.data.find((m: any) => !m.is_partner);
+          const theirs = moods.data.find((m: any) => m.is_partner);
+          if (mine) setMyMood(mine);
+          if (theirs) {
+             setPartnerMood(theirs);
+             setPartnerName(theirs.author_name);
+          }
+        }
+      } catch (e) {
+        console.log("Error fetching current mood:", e);
+      }
+
+      try {
+        const opts = await getMoodList();
+        if (opts && opts.data) {
+          setMoodOptions(opts.data);
+        }
+      } catch (e) {
+        console.log("Error fetching mood list:", e);
+      } finally {
+        setIsLoadingMood(false);
+      }
     };
     loadData();
   }, []);
@@ -241,6 +266,23 @@ export const HomeScreen: React.FC = () => {
       console.log("Error submitting checkin:", e);
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleMoodSelect = async (moodId: string) => {
+    setMoodError(null);
+    try {
+      await logMood({ mood_id: moodId });
+      // Refresh current mood
+      const moods = await getCurrentMood();
+      if (moods && moods.data) {
+        const mine = moods.data.find((m: any) => !m.is_partner);
+        if (mine) setMyMood(mine);
+      }
+      setSheet(null);
+    } catch (e) {
+      console.log("Error logging mood:", e);
+      setMoodError("Failed to save. Please try again.");
     }
   };
 
@@ -379,36 +421,62 @@ export const HomeScreen: React.FC = () => {
               { flexDirection: "row", padding: 0, overflow: "hidden" },
             ]}
           >
-            {(
-              [
-                { u: "lou", m: louMood, sheet: "mood_lou" },
-                { u: "amanda", m: amandaMood, sheet: "mood_amanda" },
-              ] as const
-            ).map((x, i) => (
-              <Pressable
-                key={x.u}
-                style={[styles.moodBlock, i === 0 && styles.moodBorder]}
-                onPress={() => setSheet(x.sheet)}
+            {/* My Mood Block */}
+            <Pressable
+              style={[styles.moodBlock, styles.moodBorder]}
+              onPress={() => setSheet("mood_selector")}
+            >
+              <AppText
+                variant="smallCaps"
+                color={Colors.muted}
+                style={{ marginBottom: 10 }}
               >
-                <AppText
-                  variant="smallCaps"
-                  color={Colors.muted}
-                  style={{ marginBottom: 10 }}
-                >
-                  {x.u.toUpperCase()}
-                </AppText>
-                <AppText
-                  size={32}
-                  color={Colors.accent}
-                  style={{ marginBottom: 8 }}
-                >
-                  {MOODS_DESIRE[x.m].mark}
-                </AppText>
-                <AppText variant="heading" size={17}>
-                  {MOODS_DESIRE[x.m].label}
-                </AppText>
-              </Pressable>
-            ))}
+                {userName.toUpperCase()}
+              </AppText>
+              {isLoadingMood ? (
+                 <AppText variant="serifItalic" color={Colors.muted} style={{ opacity: 0.5 }}>Loading...</AppText>
+              ) : (
+                <>
+                  <AppText
+                    size={32}
+                    color={Colors.accent}
+                    style={{ marginBottom: 8 }}
+                  >
+                    {myMood ? myMood.mood_symbol : "◌"}
+                  </AppText>
+                  <AppText variant="heading" size={17}>
+                    {myMood ? myMood.mood_name : "Tap to set"}
+                  </AppText>
+                </>
+              )}
+            </Pressable>
+
+            {/* Partner Mood Block */}
+            <View style={styles.moodBlock}>
+              <AppText
+                variant="smallCaps"
+                color={Colors.muted}
+                style={{ marginBottom: 10 }}
+              >
+                {partnerName.toUpperCase()}
+              </AppText>
+              {isLoadingMood ? (
+                 <AppText variant="serifItalic" color={Colors.muted} style={{ opacity: 0.5 }}>Loading...</AppText>
+              ) : (
+                <>
+                  <AppText
+                    size={32}
+                    color={Colors.accent}
+                    style={{ marginBottom: 8 }}
+                  >
+                    {partnerMood ? partnerMood.mood_symbol : "◌"}
+                  </AppText>
+                  <AppText variant="heading" size={17} color={partnerMood ? Colors.ink : Colors.muted}>
+                    {partnerMood ? partnerMood.mood_name : "Waiting..."}
+                  </AppText>
+                </>
+              )}
+            </View>
           </View>
             <Rhythms />
         </View>
@@ -420,39 +488,38 @@ export const HomeScreen: React.FC = () => {
       {/* ─── Bottom Sheets ─── */}
 
       {/* Mood selector */}
-      {["mood_lou", "mood_amanda"].map((key) => {
-        const u = key === "mood_lou" ? "lou" : "amanda";
-        return (
-          <BottomSheet
-            key={key}
-            open={sheet === key}
-            onClose={() => setSheet(null)}
-            kicker={u.toUpperCase()}
-            title="How are you?"
-          >
-            {MOODS_DESIRE.map((m, i) => (
-              <Pressable
-                key={i}
-                onPress={() => {
-                  u === "lou" ? setLouMood(i) : setAmandaMood(i);
-                  setSheet(null);
-                }}
-                style={styles.moodOption}
-              >
-                <AppText size={20} color={Colors.accent} style={{ width: 28 }}>
-                  {m.mark}
-                </AppText>
-                <AppText variant="heading" size={18} style={{ flex: 1 }}>
-                  {m.label}
-                </AppText>
-                <AppText variant="mono" style={{ fontSize: 10 }}>
-                  {String(i + 1).padStart(2, "0")}
-                </AppText>
-              </Pressable>
-            ))}
-          </BottomSheet>
-        );
-      })}
+      <BottomSheet
+        open={sheet === "mood_selector"}
+        onClose={() => { setSheet(null); setMoodError(null); }}
+        kicker={userName.toUpperCase()}
+        title="How are you?"
+      >
+        {moodOptions.map((m, i) => {
+          const isActive = myMood && myMood.mood_name === m.name;
+          return (
+            <Pressable
+              key={m.id}
+              onPress={() => handleMoodSelect(m.id)}
+              style={[styles.moodOption, isActive && { backgroundColor: "#EAE2D4" }]}
+            >
+              <AppText size={20} color={Colors.accent} style={{ width: 28 }}>
+                {m.symbol}
+              </AppText>
+              <AppText variant="heading" size={18} style={{ flex: 1, color: isActive ? Colors.ink : Colors.ink2 }}>
+                {m.name}
+              </AppText>
+              <AppText variant="mono" style={{ fontSize: 10, color: isActive ? Colors.accent : Colors.muted }}>
+                {String(i + 1).padStart(2, "0")}
+              </AppText>
+            </Pressable>
+          );
+        })}
+        {moodError && (
+          <AppText variant="serifItalic" color={Colors.accent} style={{ marginTop: 16, textAlign: 'center' }}>
+            {moodError}
+          </AppText>
+        )}
+      </BottomSheet>
 
       {/* Appreciation sheet */}
       <BottomSheet

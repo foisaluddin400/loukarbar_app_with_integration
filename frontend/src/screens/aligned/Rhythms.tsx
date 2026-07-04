@@ -1,14 +1,130 @@
-import React, { useState } from "react";
-import { View, StyleSheet, Pressable } from "react-native";
+import React, { useState, useEffect } from "react";
+import { View, StyleSheet, Pressable, Switch } from "react-native";
 import { Colors } from "../../constants/colors";
 import { AppText } from "@/components/ui/AppText";
 import { AppButton } from "@/components/ui/AppButton";
 import { BottomSheet } from "@/components/ui/BottomSheet";
+import { AppTextInput } from "@/components/ui/AppTextInput";
+import { getLifecycleOverview, addPeriodStart } from "../../services/lifecycleApi";
+import { getEnergyLogs, createEnergyLog } from "../../services/energyApi";
+import { getUserProfile } from "../../services/userApi";
+import { Calendar, DateData } from "react-native-calendars";
+
+const ENERGY_LEVELS = ["Drained", "Flat", "Steady", "On", "Lit"];
+const SLEEP_LEVELS = ["Depleted", "Under-Slept", "Adequate", "Rested"];
+const STRESS_LEVELS = ["Light", "Moderate", "Heavy", "Max"];
 
 const Rhythms: React.FC = () => {
   const [activeSheet, setActiveSheet] = useState<
     "herRhythm" | "yourState" | null
   >(null);
+
+  // API State
+  const [lifecycle, setLifecycle] = useState<any>(null);
+  const [userGender, setUserGender] = useState<string>("Male");
+  const [showCalendar, setShowCalendar] = useState<boolean>(false);
+  
+  // Energy Form State
+  const [energyLevel, setEnergyLevel] = useState<number>(2);
+  const [sleepLevel, setSleepLevel] = useState<number>(2);
+  const [stressLevel, setStressLevel] = useState<number>(1);
+  const [energyNotes, setEnergyNotes] = useState<string>("");
+  const [shareWithPartner, setShareWithPartner] = useState<boolean>(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSuccess, setIsSuccess] = useState(false);
+  const [isLoadingLifecycle, setIsLoadingLifecycle] = useState(true);
+  const [isLoadingEnergy, setIsLoadingEnergy] = useState(true);
+
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        const lc = await getLifecycleOverview();
+        if (lc && lc.success) {
+          setLifecycle(lc);
+        }
+      } catch (e) {
+        console.log("Error loading lifecycle overview", e);
+      } finally {
+        setIsLoadingLifecycle(false);
+      }
+      
+      try {
+        const profile = await getUserProfile();
+        if (profile && profile.success && profile.data) {
+          setUserGender(profile.data.gender || "Male");
+        }
+      } catch (e) {
+        console.log("Error loading user profile", e);
+      }
+      
+      try {
+        const el = await getEnergyLogs();
+        if (el && el.success && el.data.length > 0) {
+          const latest = el.data[0];
+          setEnergyLevel(Math.max(0, ENERGY_LEVELS.indexOf(latest.energy_level)));
+          setSleepLevel(Math.max(0, SLEEP_LEVELS.indexOf(latest.sleep)));
+          setStressLevel(Math.max(0, STRESS_LEVELS.indexOf(latest.stress)));
+          if (latest.notes) setEnergyNotes(latest.notes);
+          setShareWithPartner(latest.share_with_partner);
+        }
+      } catch (e) {
+        console.log("Error loading energy logs", e);
+      } finally {
+        setIsLoadingEnergy(false);
+      }
+    };
+    loadData();
+  }, []);
+
+  const handleUpdateCycle = async (day: DateData) => {
+    setShowCalendar(false);
+    try {
+      const [year, month, dayStr] = day.dateString.split("-");
+      const formattedDate = `${month}.${dayStr}.${year}`;
+      await addPeriodStart({ start_date: formattedDate });
+      
+      setIsLoadingLifecycle(true);
+      const lc = await getLifecycleOverview();
+      if (lc && lc.success) {
+        setLifecycle(lc);
+      }
+    } catch (e) {
+      console.log("Failed to update cycle dates", e);
+    } finally {
+      setIsLoadingLifecycle(false);
+    }
+  };
+
+  const handleEnergySubmit = async () => {
+    setIsSubmitting(true);
+    try {
+      await createEnergyLog({
+        energy_level: ENERGY_LEVELS[energyLevel],
+        sleep: SLEEP_LEVELS[sleepLevel],
+        stress: STRESS_LEVELS[stressLevel],
+        notes: energyNotes,
+        share_with_partner: shareWithPartner
+      });
+      setIsSuccess(true);
+      setTimeout(() => {
+        setIsSuccess(false);
+        setActiveSheet(null);
+      }, 1000);
+    } catch (e) {
+      console.log("Error submitting energy log", e);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const ownerName = lifecycle?.period_user_name || "Partner";
+  const hasCycleData = !!lifecycle?.stats?.current_phase;
+  const currentPhase = lifecycle?.stats?.current_phase || "Not set";
+  const daysSinceStart = lifecycle?.stats?.days_since_start || 0;
+  const currentNoteText = lifecycle?.current_note?.text || "No note for today.";
+  const currentNoteAgo = lifecycle?.current_note?.created_ago || "Just now";
+  const phaseDesc = lifecycle?.stats?.phase_description || "";
+
 
   return (
     <View>
@@ -30,29 +146,58 @@ const Rhythms: React.FC = () => {
             <AppText style={{ fontSize: 15 }}>◊</AppText>
           </View>
           <View>
-            <AppText
-              variant="mono"
-              color={Colors.accent}
-              style={{ fontSize: 10 }}
-            >
-              AMANDA • FOLLICULAR • DAY 9
-            </AppText>
-            <AppText
-              variant="heading"
-              size={17}
-              style={{ marginTop: 5, lineHeight: 24 }}
-            >
-              Tender today. More sensitive than usual.{"\n"}If I go quiet, it
-              isn't you.
-            </AppText>
+            {isLoadingLifecycle ? (
+              <AppText variant="serifItalic" color={Colors.muted} style={{ marginTop: 10 }}>Loading rhythm data...</AppText>
+            ) : hasCycleData ? (
+              <>
+                <AppText
+                  variant="mono"
+                  color={Colors.accent}
+                  style={{ fontSize: 10 }}
+                >
+                  {ownerName.toUpperCase()} • {currentPhase.toUpperCase()} • DAY {daysSinceStart}
+                </AppText>
+                <AppText
+                  variant="heading"
+                  size={17}
+                  style={{ marginTop: 5, lineHeight: 24 }}
+                >
+                  {currentNoteText}
+                </AppText>
 
-            <AppText
-              variant="mono"
-              color={Colors.muted}
-              style={{ fontSize: 10, marginTop: 10 }}
-            >
-              TAP FOR CONTEXT
-            </AppText>
+                <AppText
+                  variant="mono"
+                  color={Colors.muted}
+                  style={{ fontSize: 10, marginTop: 10 }}
+                >
+                  TAP FOR CONTEXT
+                </AppText>
+              </>
+            ) : (
+              <>
+                <AppText
+                  variant="mono"
+                  color={Colors.muted}
+                  style={{ fontSize: 10 }}
+                >
+                  {ownerName.toUpperCase()}
+                </AppText>
+                <AppText
+                  variant="heading"
+                  size={17}
+                  style={{ marginTop: 5, lineHeight: 24, color: Colors.muted }}
+                >
+                  No cycle data logged yet.
+                </AppText>
+                <AppText
+                  variant="mono"
+                  color={Colors.accent}
+                  style={{ fontSize: 10, marginTop: 10 }}
+                >
+                  TAP TO LEARN MORE
+                </AppText>
+              </>
+            )}
           </View>
         </View>
 
@@ -115,7 +260,7 @@ const Rhythms: React.FC = () => {
             color={Colors.muted}
             style={{ marginBottom: 20, lineHeight: 22 }}
           >
-            Amanda chose to share this so you have context — not so you have to fix anything. Just hold it with her.
+            {ownerName} chose to share this so you have context — not so you have to fix anything. Just hold it with her.
           </AppText>
           <View style={styles.phaseRow}>
             <View style={{ flex: 1 }}>
@@ -125,27 +270,18 @@ const Rhythms: React.FC = () => {
                   color={Colors.accent}
                   style={{ fontSize: 10 }}
                 >
-                  CURRENT PHASE · DAY 9 OF CYCLE
+                  CURRENT PHASE · DAY {daysSinceStart} OF CYCLE
                 </AppText>
                 <AppText variant="mono" style={{ fontSize: 25 }}>
-                  Follicular.
+                  {currentPhase}.
                 </AppText>
               </View>
               <AppText
-                variant="mono"
-                color={Colors.muted}
-                style={{ fontSize: 10, marginTop: 7 }}
-              >
-                DAYS 6–13 · ESTROGEN RISING
-              </AppText>
-              <AppText
                 variant="serifItalic"
                 size={16}
-                style={{ lineHeight: 24 }}
+                style={{ lineHeight: 24, marginTop: 12 }}
               >
-                FSH drives follicle development and estrogen climbs steadily.
-                Energy, mood, and openness tend to rise. A natural window for
-                bigger plans and deeper connection.
+                {phaseDesc}
               </AppText>
             </View>
           </View>
@@ -158,15 +294,14 @@ const Rhythms: React.FC = () => {
               • IN HER WORDS
             </AppText>
             <AppText variant="serifItalic" size={16} style={{ lineHeight: 24 }}>
-              "Tender today. More sensitive than usual. If I go quiet, it isn't
-              you."
+              "{currentNoteText}"
             </AppText>
             <AppText
               variant="mono"
               color={Colors.muted}
               style={{ fontSize: 9, marginTop: 12 }}
             >
-              UPDATED 5 HOURS AGO
+              UPDATED {currentNoteAgo.toUpperCase()}
             </AppText>
           </View>
 
@@ -243,22 +378,41 @@ const Rhythms: React.FC = () => {
             </View>
           ))}
 
-          <Pressable style={styles.updateCycle}>
-            <AppText
-              variant="mono"
-              color={Colors.accent}
-              style={{ fontSize: 10 }}
-            >
-              ♦ UPDATE CYCLE DATES
-            </AppText>
-          </Pressable>
+          {userGender === "Female" && (
+            <>
+              <Pressable 
+                style={styles.updateCycle} 
+                onPress={() => setShowCalendar(!showCalendar)}
+              >
+                <AppText
+                  variant="mono"
+                  color={Colors.accent}
+                  style={{ fontSize: 10 }}
+                >
+                  ♦ UPDATE CYCLE DATES
+                </AppText>
+              </Pressable>
+              
+              {showCalendar && (
+                <View style={{ marginTop: 20, backgroundColor: "#fff", borderRadius: 10, overflow: "hidden" }}>
+                  <Calendar
+                    onDayPress={handleUpdateCycle}
+                    theme={{
+                      todayTextColor: Colors.accent,
+                      arrowColor: Colors.accent,
+                    }}
+                  />
+                </View>
+              )}
+            </>
+          )}
 
           <AppText
             variant="heading"
             color={Colors.muted}
             style={{ textAlign: "center", marginTop: 20, fontSize: 13 }}
           >
-            Amanda controls what's shown here. She can turn it off anytime.
+            {ownerName} controls what's shown here. She can turn it off anytime.
           </AppText>
         </View>
       </BottomSheet>
@@ -277,8 +431,7 @@ const Rhythms: React.FC = () => {
             color={Colors.muted}
             style={{ marginBottom: 20, lineHeight: 22 }}
           >
-            Sleep debt and stress load measurably shift both. This is an honest
-            signal, not a performance number.
+            Men operate on a daily hormonal rhythm too — testosterone peaks in the morning and drops 50%+ by evening, cortisol curves inversely. Sleep debt and stress load measurably shift both. This is an honest signal, not a performance number.
           </AppText>
 
           {/* Energy */}
@@ -294,24 +447,27 @@ const Rhythms: React.FC = () => {
               </AppText>
             </View>
             <View style={styles.optionRow}>
-              {["DRAINED", "FLAT", "STEADY", "ON", "LIT"].map((label, i) => (
+              {ENERGY_LEVELS.map((label, i) => (
                 <Pressable
                   key={i}
-                  style={[styles.optionBtn, i === 2 && styles.selectedOption]}
+                  style={[styles.optionBtn, i === energyLevel && styles.selectedOption]}
+                  onPress={() => setEnergyLevel(i)}
                 >
                   <AppText
                     style={{
-                      color: i === 2 ? "#fff" : Colors.ink,
+                      color: i === energyLevel ? "#fff" : Colors.ink,
                       fontSize: 13,
                     }}
                   >
-                    {label}
+                    {label.toUpperCase()}
                   </AppText>
                 </Pressable>
               ))}
             </View>
             <AppText variant="serifItalic" size={13} color={Colors.muted}>
-              Steady — normal range. Holding well.
+              {ENERGY_LEVELS[energyLevel]} — {
+                ["Depleted state. Needs total rest.", "Running low. Taking it easy.", "Normal range. Holding well.", "Elevated energy. Feeling good.", "Firing on all cylinders."][energyLevel]
+              }
             </AppText>
           </View>
 
@@ -328,29 +484,32 @@ const Rhythms: React.FC = () => {
               </AppText>
             </View>
             <View style={styles.optionRow}>
-              {["DEPLETED", "UNDER-SLEPT", "ADEQUATE", "RESTED"].map(
+              {SLEEP_LEVELS.map(
                 (label, i) => (
                   <Pressable
                     key={i}
                     style={[
                       styles.optionBtn,
-                      i === 1 && styles.selectedOptionGreen,
+                      i === sleepLevel && styles.selectedOptionGreen,
                     ]}
+                    onPress={() => setSleepLevel(i)}
                   >
                     <AppText
                       style={{
-                        color: i === 1 ? "#fff" : Colors.ink,
+                        color: i === sleepLevel ? "#fff" : Colors.ink,
                         fontSize: 13,
                       }}
                     >
-                      {label}
+                      {label.toUpperCase()}
                     </AppText>
                   </Pressable>
                 ),
               )}
             </View>
             <AppText variant="serifItalic" size={13} color={Colors.muted}>
-              Under-slept — one rough night. Recoverable.
+              {SLEEP_LEVELS[sleepLevel]} — {
+                ["Zero recovery. Running on empty.", "One rough night. Recoverable.", "Solid sleep. Ready for the day.", "Excellent recovery. Feeling completely restored."][sleepLevel]
+              }
             </AppText>
           </View>
 
@@ -367,27 +526,30 @@ const Rhythms: React.FC = () => {
               </AppText>
             </View>
             <View style={styles.optionRow}>
-              {["LIGHT", "MODERATE", "HEAVY", "MAX"].map((label, i) => (
+              {STRESS_LEVELS.map((label, i) => (
                 <Pressable
                   key={i}
                   style={[
                     styles.optionBtn,
-                    i === 2 && styles.selectedOptionBrown,
+                    i === stressLevel && styles.selectedOptionBrown,
                   ]}
+                  onPress={() => setStressLevel(i)}
                 >
                   <AppText
                     style={{
-                      color: i === 2 ? "#fff" : Colors.ink,
+                      color: i === stressLevel ? "#fff" : Colors.ink,
                       fontSize: 13,
                     }}
                   >
-                    {label}
+                    {label.toUpperCase()}
                   </AppText>
                 </Pressable>
               ))}
             </View>
             <AppText variant="serifItalic" size={13} color={Colors.muted}>
-              Heavy — elevated load. Shorter patience expected.
+              {STRESS_LEVELS[stressLevel]} — {
+                ["Low demand. Feeling relaxed.", "Manageable load. Standard day.", "Elevated load. Shorter patience expected.", "Overwhelmed. Need a break."][stressLevel]
+              }
             </AppText>
           </View>
 
@@ -401,10 +563,13 @@ const Rhythms: React.FC = () => {
               04 IN YOUR WORDS (OPTIONAL)
             </AppText>
             <View style={styles.inputBox}>
-              <AppText variant="serifItalic" size={15} color={Colors.muted}>
-                Didn't sleep well. Work heavy. Not short with you — just running
-                on fumes.
-              </AppText>
+              <AppTextInput 
+                multiline
+                placeholder="Optional notes on how you're feeling..."
+                value={energyNotes}
+                onChangeText={setEnergyNotes}
+                style={{ fontSize: 20, fontFamily: 'serifItalic', color: Colors.ink, lineHeight: 28 }}
+              />
             </View>
           </View>
 
@@ -412,7 +577,7 @@ const Rhythms: React.FC = () => {
           <View style={styles.shareRow}>
             <View style={{ flex: 1 }}>
               <AppText variant="heading" size={16}>
-                Share with Amanda
+                Share with {ownerName}
               </AppText>
               <AppText
                 variant="mono"
@@ -422,13 +587,23 @@ const Rhythms: React.FC = () => {
                 She'll see this on her Today. You can turn it off anytime.
               </AppText>
             </View>
-            <View style={styles.toggle}>
-              <View style={styles.toggleCircle} />
-            </View>
+            <Switch
+              value={shareWithPartner}
+              onValueChange={setShareWithPartner}
+              trackColor={{ false: Colors.rule, true: Colors.accent }}
+              thumbColor={"#fff"}
+            />
           </View>
 
-          <AppButton variant="solid" full size="lg" style={{ marginTop: 32 }}>
-            SAVE FOR TODAY →
+          <AppButton 
+            variant={isSuccess ? "outline" : "solid"}
+            full 
+            size="lg" 
+            style={{ marginTop: 32 }}
+            onPress={handleEnergySubmit}
+            disabled={isSubmitting || isSuccess || isLoadingEnergy}
+          >
+            {isSuccess ? "SAVED!" : isSubmitting ? "SAVING..." : "SAVE FOR TODAY →"}
           </AppButton>
         </View>
       </BottomSheet>

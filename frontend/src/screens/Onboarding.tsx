@@ -22,6 +22,7 @@ interface FormData {
   startDate: string;
   longDistance: boolean;
   photoUri: string | null;
+  gender: string;
 }
 
 export const Onboarding: React.FC = () => {
@@ -33,6 +34,7 @@ export const Onboarding: React.FC = () => {
     startDate: "",
     longDistance: true,
     photoUri: null,
+    gender: "Not to say",
   });
 
   // Calendar States
@@ -181,6 +183,37 @@ export const Onboarding: React.FC = () => {
     },
     {
       kicker: "Question 05",
+      title: "How do you identify?",
+      sub: "Used to tailor health insights for you.",
+      body: (
+        <View>
+          {["Female", "Male", "Not to say"].map((g) => (
+            <Pressable
+              key={g}
+              onPress={() => setData((d) => ({ ...d, gender: g }))}
+              style={[
+                styles.optionRow,
+                { opacity: g === data.gender ? 1 : 0.6 },
+              ]}
+            >
+              <View style={{ flex: 1 }}>
+                <AppText variant="heading" size={18}>
+                  {g}
+                </AppText>
+              </View>
+              <AppText
+                size={18}
+                color={g === data.gender ? Colors.accent : Colors.rule}
+              >
+                {g === data.gender ? "●" : "○"}
+              </AppText>
+            </Pressable>
+          ))}
+        </View>
+      ),
+    },
+    {
+      kicker: "Question 06",
       title: "Add a Face to Your Name",
       sub: "Choose a profile photo. Optional but recommended.",
       body: (
@@ -334,7 +367,7 @@ export const Onboarding: React.FC = () => {
             style={{ flex: step > 0 ? 2 : 1 }}
             disabled={isSubmitting}
             onPress={async () => {
-              if (step === 4) {
+              if (step === 5) {
                 if (!data.name || !data.city || !data.startDate) {
                   Alert.alert("Missing Fields", "Please fill out all the fields before continuing.");
                   return;
@@ -348,6 +381,7 @@ export const Onboarding: React.FC = () => {
                     city_name: data.city,
                     relationship_start_date: formattedDate,
                     is_long_distance: data.longDistance,
+                    gender: data.gender,
                   };
                   const res = await createRelationship(payload);
                   if (res.success && res.data && res.data.secret_key) {

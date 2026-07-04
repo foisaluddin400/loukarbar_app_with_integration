@@ -32,6 +32,11 @@ export const updateUserName = async (name) => {
   return response.data;
 };
 
+export const getUserProfile = async () => {
+  const response = await api.get('/users/me');
+  return response.data;
+};
+
 export const getPartnerProfile = async () => {
   const response = await api.get('/users/partner');
   return response.data;

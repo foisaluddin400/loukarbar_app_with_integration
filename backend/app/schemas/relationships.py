@@ -29,6 +29,10 @@ class RelationshipCreate(BaseModel):
         ),
         description="Is long distance relation [true/false]"
     )
+    gender: str = Field(
+        default="Not to say",
+        description="Gender of the user (Male, Female, Not to say)"
+    )
 
     model_config = {
         "populate_by_name": True
@@ -73,6 +77,7 @@ class PartnerInfo(BaseModel):
     city_name: str
     relationship_start_date: str
     is_long_distance: bool
+    gender: Optional[str] = "Not to say"
 
 class RelationshipResponseData(BaseModel):
     id: str = Field(..., validation_alias=AliasChoices("id", "_id"))
@@ -80,6 +85,7 @@ class RelationshipResponseData(BaseModel):
     city_name: str
     relationship_start_date: str
     is_long_distance: bool
+    gender: Optional[str] = "Not to say"
     secret_key: Optional[str] = None
     is_aligned: bool = False
     partner: Optional[PartnerInfo] = None
