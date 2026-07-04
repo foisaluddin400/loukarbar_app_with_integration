@@ -109,23 +109,44 @@ const SamVibeNav: React.FC<SamVibeNavProps> = ({ onPartnerChange }) => {
   useEffect(() => {
     if (!profile?.user_id) return;
     
-    const wsUrl = process.env.EXPO_PUBLIC_BACKEND_URL
-      ? process.env.EXPO_PUBLIC_BACKEND_URL.replace("http", "ws") + `/ws/notifications/${profile.user_id}`
-      : `ws://localhost:8000/ws/notifications/${profile.user_id}`;
-      
-    const ws = new WebSocket(wsUrl);
+    let ws: WebSocket;
+    let reconnectTimer: ReturnType<typeof setTimeout>;
+    let isMounted = true;
     
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.type === "NEW_NOTIFICATION") {
-           DeviceEventEmitter.emit("REFRESH_VIBE_DATA");
-        }
-      } catch (e) {}
+    const connectWs = () => {
+      if (!isMounted) return;
+      
+      const wsUrl = process.env.EXPO_PUBLIC_BACKEND_URL
+        ? process.env.EXPO_PUBLIC_BACKEND_URL.replace("http", "ws") + `/ws/notifications/${profile.user_id}`
+        : `ws://localhost:8000/ws/notifications/${profile.user_id}`;
+        
+      ws = new WebSocket(wsUrl);
+      
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === "NEW_NOTIFICATION") {
+             DeviceEventEmitter.emit("REFRESH_VIBE_DATA");
+          }
+        } catch (e) {}
+      };
+
+      ws.onclose = () => {
+         if (isMounted) {
+            reconnectTimer = setTimeout(connectWs, 3000);
+         }
+      };
     };
     
+    connectWs();
+    
     return () => {
-      ws.close();
+      isMounted = false;
+      clearTimeout(reconnectTimer);
+      if (ws) {
+        ws.onclose = null;
+        ws.close();
+      }
     };
   }, [profile?.user_id]);
 

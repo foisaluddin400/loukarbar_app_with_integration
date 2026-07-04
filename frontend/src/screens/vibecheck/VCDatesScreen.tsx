@@ -211,6 +211,7 @@ export const VCDatesScreen: React.FC = () => {
       }
       setSheet(false);
       fetchData();
+      DeviceEventEmitter.emit("REFRESH_VIBE_DATA");
     } catch (e: any) {
       Alert.alert("Error", e.response?.data?.detail || e.message || "Failed to save date.");
     }
@@ -229,6 +230,7 @@ export const VCDatesScreen: React.FC = () => {
             try {
               await deleteVibeDate(id);
               fetchData();
+              DeviceEventEmitter.emit("REFRESH_VIBE_DATA");
             } catch (e: any) {
               Alert.alert("Error", e.response?.data?.detail || "Failed to cancel date.");
             }
@@ -242,6 +244,7 @@ export const VCDatesScreen: React.FC = () => {
     try {
       await respondToVibeDate(id, { action });
       fetchData();
+      DeviceEventEmitter.emit("REFRESH_VIBE_DATA");
     } catch (e: any) {
       Alert.alert("Error", e.response?.data?.detail || "Failed to respond.");
     }
