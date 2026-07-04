@@ -41,11 +41,11 @@ export const ModeSelector: React.FC = () => {
       if (user.is_aligned || user.partner || user.secret_key) {
         nav.navigate("AlignedApp");
       } else {
-        nav.navigate("AlignedWelcome");
+        nav.navigate("AlignedOnboarding");
       }
     } catch (error) {
       console.log("Error checking user state:", error);
-      nav.navigate("AlignedWelcome");
+      nav.navigate("AlignedOnboarding");
     } finally {
       setLoadingAligned(false);
     }

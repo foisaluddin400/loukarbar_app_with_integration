@@ -43,6 +43,7 @@ class ChangePasswordRequest(BaseModel):
 
 class DeleteAccountRequest(BaseModel):
     password: str = Field(..., examples=[PASSWORD_EXAMPLE], description="Account password")
+    target: str = Field(default="all", description="Target data to delete: 'aligned', 'vibe_check', or 'all'")
 
 class TokenResponse(BaseModel):
     access_token: str

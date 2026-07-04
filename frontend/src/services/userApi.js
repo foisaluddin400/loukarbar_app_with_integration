@@ -6,6 +6,17 @@ export const getUsers = async () => {
   return response.data;
 };
 
+export const deletePhoto = async () => {
+  const response = await api.delete('/users/photo');
+  return response.data;
+};
+
+export const getAlignedSyncSummary = async (timezone = "UTC") => {
+  const params = new URLSearchParams({ timezone, _t: Date.now().toString() });
+  const response = await api.get(`/users/sync-summary?${params.toString()}`);
+  return response.data;
+};
+
 export const loginUser = async (data) => {
   const response = await api.post('/login', data);
   return response.data;
@@ -54,8 +65,8 @@ export const breakAlignment = async () => {
   return response.data;
 };
 
-export const deleteAccount = async (password) => {
-  const response = await api.post('/delete-account', { password });
+export const deleteAccount = async (password, target = 'all') => {
+  const response = await api.post('/auth/delete-account', { password, target });
   return response.data;
 };
 

@@ -335,7 +335,7 @@ class AuthService:
         )
         return True
 
-    async def delete_user(self, user_id: str, password: str) -> bool:
+    async def delete_user(self, user_id: str, password: str, target: str = "all") -> bool:
         from bson import ObjectId
         user = await self.collection.find_one({"_id": ObjectId(user_id)})
         if not user:
@@ -343,8 +343,73 @@ class AuthService:
             
         if not user.get("password_hash") or not verify_password(password, user["password_hash"]):
             raise ValueError("Invalid password")
+
+        # Define which collections to clean up based on target
+        # Vibe Check collections typically start with "vibe_"
+        
+        # 1. Break alignment to safely unlink partner (if target is aligned or all)
+        if target in ["all", "aligned"] and user.get("is_aligned"):
+            try:
+                await relationship_service.break_alignment(user_id)
+            except Exception as e:
+                print(f"Failed to break alignment during account deletion: {e}")
+                
+        # 2. Cleanup user data across specified collections
+        collections = await self.collection.database.list_collection_names()
+        for coll_name in collections:
+            if coll_name == "users":
+                continue
+                
+            # Filter collections based on target
+            is_vibe_collection = coll_name.startswith("vibe_")
+            if target == "aligned" and is_vibe_collection:
+                continue
+            if target == "vibe_check" and not is_vibe_collection:
+                continue
             
-        result = await self.collection.delete_one({"_id": ObjectId(user_id)})
-        return result.deleted_count > 0
+            coll = self.collection.database[coll_name]
+            await coll.delete_many({
+                "$or": [
+                    {"user_id": user_id},
+                    {"user_id": ObjectId(user_id)},
+                    {"sender_id": user_id},
+                    {"sender_id": ObjectId(user_id)},
+                    {"recipient_id": user_id},
+                    {"recipient_id": ObjectId(user_id)},
+                    {"created_by": user_id},
+                    {"created_by": ObjectId(user_id)},
+                    {"participant_ids": user_id},
+                    {"participant_ids": ObjectId(user_id)},
+                    {"partner_id": user_id},
+                    {"partner_id": ObjectId(user_id)},
+                    {"user_id_1": user_id},
+                    {"user_id_1": ObjectId(user_id)},
+                    {"user_id_2": user_id},
+                    {"user_id_2": ObjectId(user_id)}
+                ]
+            })
+            
+        # 3. Update or Delete the user document
+        if target == "all":
+            result = await self.collection.delete_one({"_id": ObjectId(user_id)})
+            return result.deleted_count > 0
+        elif target == "aligned":
+            # Reset aligned-specific fields
+            await self.collection.update_one(
+                {"_id": ObjectId(user_id)},
+                {"$set": {
+                    "city_name": "",
+                    "relationship_start_date": "",
+                    "is_long_distance": False,
+                    "secret_key": None,
+                    "is_aligned": False,
+                    "partner": None
+                }}
+            )
+            return True
+        elif target == "vibe_check":
+            # Just return true since we deleted the vibe collections above
+            return True
+        return False
 
 auth_service = AuthService()

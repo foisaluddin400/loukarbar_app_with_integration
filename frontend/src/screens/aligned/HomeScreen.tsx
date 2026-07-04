@@ -21,6 +21,7 @@ import { getMe } from "../../services/authApi";
 import { getStreak } from "../../services/streakApi";
 import { completeRitual } from "../../services/ritualApi";
 import { createCheckin, updateCheckin, getCheckin, getQuestionsEndpoint } from "../../services/checkinApi";
+import { getAlignedSyncSummary } from "../../services/userApi";
 
 const MOODS_DESIRE = [
   { mark: "◯", label: "At peace" },
@@ -70,7 +71,7 @@ const RITUAL_BY_TOD: Record<
 export const HomeScreen: React.FC = () => {
   usePresenceTracker();
   const tod = useTimeOfDay();
-  const ritual = RITUAL_BY_TOD[tod];
+
   const [activeUsTab, setActiveUsTab] = useState<"TIME" | "DATES" | "REUNION">(
     "TIME",
   );
@@ -95,9 +96,10 @@ export const HomeScreen: React.FC = () => {
   const [sheet, setSheet] = useState<string | null>(null);
   const [louMood, setLouMood] = usePersist<number>("home.louMood", 1);
   const [amandaMood, setAmandaMood] = usePersist<number>("home.amandaMood", 3);
-  const [weScore] = usePersist<number>("home.weScore", 72);
+  const [weScore, setWeScore] = usePersist<number>("home.weScore", 72);
   const [streak, setStreak] = useState<number>(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [syncData, setSyncData] = useState<any>(null);
 
   // Appreciation State
   const [appreciationText, setAppreciationText] = useState("");
@@ -107,6 +109,13 @@ export const HomeScreen: React.FC = () => {
   const [checkinQ2, setCheckinQ2] = useState("");
   const [checkinQ3, setCheckinQ3] = useState("");
   const [hasCheckedInToday, setHasCheckedInToday] = useState(false);
+  const timeBasedRitual = RITUAL_BY_TOD[tod] || RITUAL_BY_TOD['afternoon'];
+  const ritual = hasCheckedInToday ? timeBasedRitual : {
+    title: "Daily check-in",
+    sub: "A gentle pulse on how you're both doing.",
+    cta: "Check in",
+    sheet: "checkin",
+  };
   const [partnerCheckin, setPartnerCheckin] = useState<any>(null);
   const [showPartnerCheckin, setShowPartnerCheckin] = useState(false);
   
@@ -153,6 +162,17 @@ export const HomeScreen: React.FC = () => {
         }
       } catch (e) {
         console.log("Error fetching existing checkin:", e);
+      }
+
+      try {
+        const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        const summary = await getAlignedSyncSummary(tz);
+        if (summary) {
+          setSyncData(summary);
+          setWeScore(summary.overall_score);
+        }
+      } catch (e) {
+        console.log("Error fetching sync summary:", e);
       }
     };
     loadData();
@@ -485,46 +505,68 @@ export const HomeScreen: React.FC = () => {
          Three questions. Honest answers. A gentle pulse on where you both are this week.
         </AppText>
 
-        {partnerCheckin && (
-          <Pressable 
-            onPress={() => setShowPartnerCheckin(!showPartnerCheckin)}
-            style={{ alignSelf: 'flex-start', paddingVertical: 8, paddingHorizontal: 12, backgroundColor: Colors.rule, borderRadius: 20, marginBottom: 15 }}
-          >
-            <AppText variant="mono" color={Colors.ink} style={{ fontSize: 10 }}>
-              {showPartnerCheckin ? "WRITE YOURS" : "SEE PARTNER'S"}
-            </AppText>
-          </Pressable>
-        )}
+        {partnerCheckin ? (
+          <>
+            {/* Side-by-side editable UI */}
+            {/* User Section (editable) */}
+            <View style={{ borderWidth: 1, borderColor: Colors.rule, borderRadius: 0, marginBottom: 24 }}>
+              <View style={{ flexDirection: "row", justifyContent: "space-between", backgroundColor: "#EAE2D4", padding: 12, borderBottomWidth: 1, borderBottomColor: Colors.rule }}>
+                <AppText variant="mono" size={11} color={Colors.ink2}>{userName.toUpperCase()}</AppText>
+                <AppText variant="mono" size={11} color={Colors.muted}>Nº 01</AppText>
+              </View>
+              
+              <View style={{ padding: 16, borderBottomWidth: 1, borderBottomColor: Colors.rule }}>
+                <AppTextInput 
+                  label={questions.question_1} n="01" placeholder="Honestly, I'm..." 
+                  value={checkinQ1} onChangeText={setCheckinQ1} 
+                />
+              </View>
+              
+              <View style={{ padding: 16, borderBottomWidth: 1, borderBottomColor: Colors.rule }}>
+                <AppTextInput 
+                  label={questions.question_2} n="02" placeholder="I could use..." 
+                  value={checkinQ2} onChangeText={setCheckinQ2} 
+                />
+              </View>
+              
+              <View style={{ padding: 16 }}>
+                <AppTextInput 
+                  label={questions.question_3} n="03" placeholder="I've been thinking about..." 
+                  value={checkinQ3} onChangeText={setCheckinQ3} 
+                />
+              </View>
+            </View>
 
-        {showPartnerCheckin ? (
-          <View style={{ marginBottom: 20 }}>
-            <View style={{ marginBottom: 20 }}>
-              <AppText variant="smallCaps" color={Colors.muted} style={{ marginBottom: 4 }}>
-                01. {questions.question_1}
-              </AppText>
-              <AppText variant="serifItalic" size={17} color={Colors.ink}>
-                "{partnerCheckin.answer_1}"
-              </AppText>
+            {/* Partner Section (read-only) */}
+            <View style={{ borderWidth: 1, borderColor: Colors.rule, borderRadius: 0, marginBottom: 32 }}>
+              <View style={{ flexDirection: "row", justifyContent: "space-between", backgroundColor: "#EAE2D4", padding: 12, borderBottomWidth: 1, borderBottomColor: Colors.rule }}>
+                <AppText variant="mono" size={11} color={Colors.ink2}>{activeUser === "lou" ? "AMANDA" : "LOU"}</AppText>
+                <AppText variant="mono" size={11} color={Colors.muted}>Nº 02</AppText>
+              </View>
+              
+              <View style={{ padding: 16, borderBottomWidth: 1, borderBottomColor: Colors.rule }}>
+                <AppText variant="mono" size={11} color={Colors.muted} style={{ marginBottom: 12 }}>01 {questions.question_1.toUpperCase()}</AppText>
+                <AppText variant="serifItalic" size={16} color={Colors.ink}>"{partnerCheckin.answer_1}"</AppText>
+              </View>
+              
+              <View style={{ padding: 16, borderBottomWidth: 1, borderBottomColor: Colors.rule }}>
+                <AppText variant="mono" size={11} color={Colors.muted} style={{ marginBottom: 12 }}>02 {questions.question_2.toUpperCase()}</AppText>
+                <AppText variant="serifItalic" size={16} color={Colors.ink}>"{partnerCheckin.answer_2}"</AppText>
+              </View>
+              
+              <View style={{ padding: 16 }}>
+                <AppText variant="mono" size={11} color={Colors.muted} style={{ marginBottom: 12 }}>03 {questions.question_3.toUpperCase()}</AppText>
+                <AppText variant="serifItalic" size={16} color={Colors.ink}>"{partnerCheckin.answer_3}"</AppText>
+              </View>
             </View>
-            <View style={{ marginBottom: 20 }}>
-              <AppText variant="smallCaps" color={Colors.muted} style={{ marginBottom: 4 }}>
-                02. {questions.question_2}
-              </AppText>
-              <AppText variant="serifItalic" size={17} color={Colors.ink}>
-                "{partnerCheckin.answer_2}"
-              </AppText>
-            </View>
-            <View style={{ marginBottom: 20 }}>
-              <AppText variant="smallCaps" color={Colors.muted} style={{ marginBottom: 4 }}>
-                03. {questions.question_3}
-              </AppText>
-              <AppText variant="serifItalic" size={17} color={Colors.ink}>
-                "{partnerCheckin.answer_3}"
-              </AppText>
-            </View>
-          </View>
+          </>
         ) : (
           <>
+            {/* Single column editable UI with status text */}
+            <AppText variant="serifItalic" size={14} color={Colors.accent} style={{ marginBottom: 20 }}>
+              Your partner has not checked in yet.
+            </AppText>
+            
             <AppTextInput 
               label={questions.question_1} n="01" placeholder="Honestly, I'm..." 
               value={checkinQ1} onChangeText={setCheckinQ1} 
@@ -542,17 +584,15 @@ export const HomeScreen: React.FC = () => {
           </>
         )}
 
-        {!showPartnerCheckin && (
-          <AppButton
-            variant="solid"
-            full
-            size="lg"
-            onPress={handleCheckinSubmit}
-            disabled={isSubmitting || !checkinQ1.trim() || !checkinQ2.trim() || !checkinQ3.trim()}
-          >
-            {isSubmitting ? (hasCheckedInToday ? "Updating..." : "Submitting...") : (hasCheckedInToday ? "Update →" : "Submit →")}
-          </AppButton>
-        )}
+        <AppButton
+          variant="solid"
+          full
+          size="lg"
+          onPress={handleCheckinSubmit}
+          disabled={isSubmitting || !checkinQ1.trim() || !checkinQ2.trim() || !checkinQ3.trim()}
+        >
+          {isSubmitting ? (hasCheckedInToday ? "Updating..." : "Submitting...") : (hasCheckedInToday ? "Update →" : "Submit →")}
+        </AppButton>
       </BottomSheet>
 
       {/* Sync score sheet */}
@@ -620,18 +660,18 @@ export const HomeScreen: React.FC = () => {
                   Daily rituals
                 </AppText>
                 <AppText variant="mono" color={Colors.muted} size={15}>
-                  25%
+                  {syncData ? syncData.rituals.percentage : 25}%
                 </AppText>
               </View>
               <View style={styles.progressBarContainer}>
-                <View style={[styles.progressBar, { width: "25%" }]} />
+                <View style={[styles.progressBar, { width: `${syncData ? syncData.rituals.percentage : 25}%` }]} />
               </View>
               <AppText
                 variant="mono"
                 color={Colors.muted}
                 style={{ marginTop: 6, fontSize: 13 }}
               >
-                0 of 7 days completed
+                {syncData ? `${syncData.rituals.count} of ${syncData.rituals.target} days completed` : '0 of 7 days completed'}
               </AppText>
             </View>
 
@@ -655,18 +695,18 @@ export const HomeScreen: React.FC = () => {
                   Weekly check-in
                 </AppText>
                 <AppText variant="mono" color={Colors.muted} size={15}>
-                  28%
+                  {syncData ? syncData.checkins.percentage : 28}%
                 </AppText>
               </View>
               <View style={styles.progressBarContainer}>
-                <View style={[styles.progressBar, { width: "28%" }]} />
+                <View style={[styles.progressBar, { width: `${syncData ? syncData.checkins.percentage : 28}%` }]} />
               </View>
               <AppText
                 variant="mono"
                 color={Colors.muted}
                 style={{ marginTop: 6, fontSize: 13 }}
               >
-                Not yet this week
+                {syncData ? `${syncData.checkins.count} this week` : 'Not yet this week'}
               </AppText>
             </View>
 
@@ -690,18 +730,18 @@ export const HomeScreen: React.FC = () => {
                   Appreciations sent
                 </AppText>
                 <AppText variant="mono" color={Colors.muted} size={15}>
-                  28%
+                  {syncData ? syncData.appreciations.percentage : 28}%
                 </AppText>
               </View>
               <View style={styles.progressBarContainer}>
-                <View style={[styles.progressBar, { width: "28%" }]} />
+                <View style={[styles.progressBar, { width: `${syncData ? syncData.appreciations.percentage : 28}%` }]} />
               </View>
               <AppText
                 variant="mono"
                 color={Colors.muted}
                 style={{ marginTop: 6, fontSize: 13 }}
               >
-                2 sent recently
+                {syncData ? `${syncData.appreciations.count} sent recently` : '2 sent recently'}
               </AppText>
             </View>
 
@@ -725,18 +765,18 @@ export const HomeScreen: React.FC = () => {
                   Thread activity
                 </AppText>
                 <AppText variant="mono" color={Colors.muted} size={15}>
-                  15%
+                  {syncData ? syncData.threads.percentage : 15}%
                 </AppText>
               </View>
               <View style={styles.progressBarContainer}>
-                <View style={[styles.progressBar, { width: "15%" }]} />
+                <View style={[styles.progressBar, { width: `${syncData ? syncData.threads.percentage : 15}%` }]} />
               </View>
               <AppText
                 variant="mono"
                 color={Colors.muted}
                 style={{ marginTop: 6, fontSize: 13 }}
               >
-                0 entries this week
+                {syncData ? `${syncData.threads.count} entries this week` : '0 entries this week'}
               </AppText>
             </View>
 
@@ -793,6 +833,68 @@ export const HomeScreen: React.FC = () => {
         </View>
         <AppButton variant="outline" full onPress={() => setSheet(null)}>
           Close
+        </AppButton>
+      </BottomSheet>
+      
+      {/* Side-by-side sheet */}
+      <BottomSheet
+        open={sheet === "side-by-side"}
+        onClose={() => setSheet(null)}
+        kicker="CHECK IN - ◈"
+        title="You're both here"
+      >
+        <AppText variant="serifItalic" size={15} color={Colors.muted} style={{ marginBottom: 24, lineHeight: 22 }}>
+          A side-by-side look at how you're both doing this week.
+        </AppText>
+        
+        {/* User Section */}
+        <View style={{ borderWidth: 1, borderColor: Colors.rule, borderRadius: 0, marginBottom: 24 }}>
+          <View style={{ flexDirection: "row", justifyContent: "space-between", backgroundColor: "#EAE2D4", padding: 12, borderBottomWidth: 1, borderBottomColor: Colors.rule }}>
+            <AppText variant="mono" size={11} color={Colors.ink2}>{userName.toUpperCase()}</AppText>
+            <AppText variant="mono" size={11} color={Colors.muted}>Nº 01</AppText>
+          </View>
+          
+          <View style={{ padding: 16, borderBottomWidth: 1, borderBottomColor: Colors.rule }}>
+            <AppText variant="mono" size={11} color={Colors.muted} style={{ marginBottom: 12 }}>01 FEELING</AppText>
+            <AppText variant="serifItalic" size={16} color={Colors.ink}>"{checkinQ1}"</AppText>
+          </View>
+          
+          <View style={{ padding: 16, borderBottomWidth: 1, borderBottomColor: Colors.rule }}>
+            <AppText variant="mono" size={11} color={Colors.muted} style={{ marginBottom: 12 }}>02 NEEDING</AppText>
+            <AppText variant="serifItalic" size={16} color={Colors.ink}>"{checkinQ2}"</AppText>
+          </View>
+          
+          <View style={{ padding: 16 }}>
+            <AppText variant="mono" size={11} color={Colors.muted} style={{ marginBottom: 12 }}>03 ON MIND</AppText>
+            <AppText variant="serifItalic" size={16} color={Colors.ink}>"{checkinQ3}"</AppText>
+          </View>
+        </View>
+
+        {/* Partner Section */}
+        <View style={{ borderWidth: 1, borderColor: Colors.rule, borderRadius: 0, marginBottom: 32 }}>
+          <View style={{ flexDirection: "row", justifyContent: "space-between", backgroundColor: "#EAE2D4", padding: 12, borderBottomWidth: 1, borderBottomColor: Colors.rule }}>
+            <AppText variant="mono" size={11} color={Colors.ink2}>{activeUser === "lou" ? "AMANDA" : "LOU"}</AppText>
+            <AppText variant="mono" size={11} color={Colors.muted}>Nº 02</AppText>
+          </View>
+          
+          <View style={{ padding: 16, borderBottomWidth: 1, borderBottomColor: Colors.rule }}>
+            <AppText variant="mono" size={11} color={Colors.muted} style={{ marginBottom: 12 }}>01 FEELING</AppText>
+            <AppText variant="serifItalic" size={16} color={Colors.ink}>"{partnerCheckin?.answer_1 || ""}"</AppText>
+          </View>
+          
+          <View style={{ padding: 16, borderBottomWidth: 1, borderBottomColor: Colors.rule }}>
+            <AppText variant="mono" size={11} color={Colors.muted} style={{ marginBottom: 12 }}>02 NEEDING</AppText>
+            <AppText variant="serifItalic" size={16} color={Colors.ink}>"{partnerCheckin?.answer_2 || ""}"</AppText>
+          </View>
+          
+          <View style={{ padding: 16 }}>
+            <AppText variant="mono" size={11} color={Colors.muted} style={{ marginBottom: 12 }}>03 ON MIND</AppText>
+            <AppText variant="serifItalic" size={16} color={Colors.ink}>"{partnerCheckin?.answer_3 || ""}"</AppText>
+          </View>
+        </View>
+        
+        <AppButton variant="outline" full onPress={() => setSheet("checkin")}>
+          NEW CHECK-IN
         </AppButton>
       </BottomSheet>
     

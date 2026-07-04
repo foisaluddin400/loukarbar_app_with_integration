@@ -4,11 +4,6 @@ import api from './api';
 
 // ─── Profile & Status ─────────────────────────────────────────
 
-export const getVibeStreak = async () => {
-  const response = await api.get(`/vibecheck/streak?_t=${Date.now()}`);
-  return response.data;
-};
-
 export const checkVibeStatus = async () => {
   const response = await api.get('/vibecheck/check');
   return response.data;
@@ -179,5 +174,13 @@ export const getVibeResults = async (partner_id, timezone = "UTC") => {
 export const getVibeStreak = async (timezone = "UTC") => {
   const params = new URLSearchParams({ timezone });
   const response = await api.get(`/vibecheck/cards/streak?${params.toString()}`);
+  return response.data;
+};
+
+// ─── Sync Summary ─────────────────────────────────────────────
+
+export const getSyncSummary = async (timezone = "UTC") => {
+  const params = new URLSearchParams({ timezone, _t: Date.now().toString() });
+  const response = await api.get(`/vibecheck/sync-summary?${params.toString()}`);
   return response.data;
 };

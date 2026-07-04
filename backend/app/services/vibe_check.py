@@ -593,4 +593,85 @@ class VibeCheckService:
         )
         return {"success": True, "message": "Connection restored."}
 
+    async def get_sync_summary(self, user_id: str, timezone_str: str = "UTC") -> Dict[str, Any]:
+        """Calculates the combined Sync score for the user and their partner."""
+        # 1. Find partner
+        profile = await self.get_profile(user_id)
+        if not profile:
+            raise ValueError("VibeCheck profile not found.")
+            
+        partner_id = None
+        conn = await self.connections.find_one({"user_id": user_id})
+        if conn:
+            partner_id = conn["partner_id"]
+            
+        user_ids = [user_id]
+        if partner_id:
+            user_ids.append(partner_id)
+            
+        # Time range: Last 7 days
+        import zoneinfo
+        try:
+            tz = zoneinfo.ZoneInfo(timezone_str)
+        except Exception:
+            tz = zoneinfo.ZoneInfo("UTC")
+            
+        now = datetime.now(timezone.utc)
+        seven_days_ago = now - timedelta(days=7)
+        
+        # We need collections from other services, so we'll access db directly
+        rituals_coll = self.db["ritual_completions"]
+        checkins_coll = self.db["check_ins"]
+        messages_coll = self.db["thread_messages"]
+        
+        # Dates for check_ins which uses string dates "YYYY-MM-DD"
+        local_now = now.astimezone(tz)
+        dates_to_check = [(local_now - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(7)]
+        
+        # 1. Rituals (in last 7 days)
+        # Note: ritual_completions stores created_at as datetime
+        rituals_count = await rituals_coll.count_documents({
+            "user_id": {"$in": user_ids},
+            "created_at": {"$gte": seven_days_ago}
+        })
+        
+        # 2. Check-ins
+        checkins_count = await checkins_coll.count_documents({
+            "user_id": {"$in": user_ids},
+            "date": {"$in": dates_to_check}
+        })
+        
+        # 3. Appreciations (Thread messages with category Appreciation)
+        appreciations_count = await messages_coll.count_documents({
+            "creator_id": {"$in": user_ids},
+            "category": "Appreciation",
+            "created_at": {"$gte": seven_days_ago}
+        })
+        
+        # 4. Threads (Any Thread message)
+        threads_count = await messages_coll.count_documents({
+            "creator_id": {"$in": user_ids},
+            "created_at": {"$gte": seven_days_ago}
+        })
+        
+        # Max targets
+        target = 7
+        
+        r_perc = min(int((rituals_count / target) * 100), 100)
+        c_perc = min(int((checkins_count / target) * 100), 100)
+        a_perc = min(int((appreciations_count / target) * 100), 100)
+        t_perc = min(int((threads_count / target) * 100), 100)
+        
+        # Weighted overall score
+        # Rituals: 30%, Check-ins: 30%, Appreciations: 20%, Threads: 20%
+        overall = int((r_perc * 0.30) + (c_perc * 0.30) + (a_perc * 0.20) + (t_perc * 0.20))
+        
+        return {
+            "overall_score": overall,
+            "rituals": {"count": rituals_count, "target": target, "percentage": r_perc},
+            "checkins": {"count": checkins_count, "target": target, "percentage": c_perc},
+            "appreciations": {"count": appreciations_count, "target": target, "percentage": a_perc},
+            "threads": {"count": threads_count, "target": target, "percentage": t_perc}
+        }
+
 vibe_check_service = VibeCheckService()

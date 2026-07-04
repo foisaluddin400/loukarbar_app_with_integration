@@ -134,6 +134,29 @@ class UsService:
             "upcoming_milestones": milestones
         }
 
+    # Update Start Date
+    async def update_start_date(self, user_id: str, new_date: str) -> Dict[str, Any]:
+        """Update the relationship_start_date on the user document."""
+        user = await self.users_collection.find_one({"_id": ObjectId(user_id)})
+        if not user:
+            raise ValueError("User not found.")
+        
+        # Also update partner's start date so both are in sync
+        partner_id = await self._get_partner_id(user_id)
+        
+        await self.users_collection.update_one(
+            {"_id": ObjectId(user_id)},
+            {"$set": {"relationship_start_date": new_date}}
+        )
+        
+        if partner_id:
+            await self.users_collection.update_one(
+                {"_id": ObjectId(partner_id)},
+                {"$set": {"relationship_start_date": new_date}}
+            )
+        
+        return {"relationship_start_date": new_date}
+
     # Milestone CRUD
     async def create_milestone(self, user_id: str, payload: MilestoneCreate) -> Dict[str, Any]:
         partner_id = await self._get_partner_id(user_id)

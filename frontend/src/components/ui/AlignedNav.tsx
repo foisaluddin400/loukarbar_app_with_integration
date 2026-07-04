@@ -131,15 +131,13 @@ const AlignedNav: React.FC = () => {
     if (!deletePassword) return;
     setIsSaving(true);
     try {
-      await deleteAccount(deletePassword);
-      await AsyncStorage.removeItem('access_token');
-      await AsyncStorage.removeItem('refresh_token');
+      await deleteAccount(deletePassword, 'aligned');
       setIsDeleteAccountOpen(false);
       setIsProfileOpen(false);
-      navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
+      navigation.reset({ index: 0, routes: [{ name: 'ModeSelector' }] });
     } catch (e: any) {
       console.error("Delete account failed", e);
-      Alert.alert("Error", e?.response?.data?.detail || "Could not delete account. Check your password.");
+      Alert.alert("Error", e?.response?.data?.detail || "Could not delete data. Check your password.");
     } finally {
       setIsSaving(false);
     }
@@ -226,7 +224,7 @@ const AlignedNav: React.FC = () => {
             </Pressable>
             
             <Pressable onPress={() => { setIsProfileOpen(false); setIsDeleteAccountOpen(true); }} style={styles.actionBtn}>
-              <AppText variant="smallCaps" color="#FF3B30" style={styles.actionText}>DELETE ACCOUNT</AppText>
+              <AppText variant="smallCaps" color="#FF3B30" style={styles.actionText}>DELETE ALIGNED DATA</AppText>
             </Pressable>
           </View>
         </View>
@@ -260,12 +258,12 @@ const AlignedNav: React.FC = () => {
       <BottomSheet
         open={isDeleteAccountOpen}
         onClose={() => setIsDeleteAccountOpen(false)}
-        title="Delete Account?"
+        title="Delete Aligned Data?"
         kicker="DANGER ZONE"
       >
         <View style={styles.sheetContent}>
           <AppText style={{ marginBottom: 20, lineHeight: 22, color: Colors.ink2 }}>
-            This action cannot be undone. All your data, check-ins, and streaks will be permanently deleted. Please confirm your password.
+            This action cannot be undone. All your Aligned data, check-ins, and streaks will be permanently deleted. Your Vibe Check data and login will remain intact. Please confirm your password.
           </AppText>
           <View style={{ marginBottom: 30 }}>
             <AppTextInput 
@@ -285,7 +283,7 @@ const AlignedNav: React.FC = () => {
             disabled={isSaving || !deletePassword}
             style={{ backgroundColor: '#FF3B30' }}
           >
-            {isSaving ? "Deleting..." : "Delete Account"}
+            {isSaving ? "Deleting..." : "Delete Aligned Data"}
           </AppButton>
         </View>
       </BottomSheet>

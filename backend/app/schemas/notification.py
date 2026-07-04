@@ -12,6 +12,7 @@ class NotificationType(str, Enum):
     VIBE_DATE = "Vibe Date"
     PRESENCE = "Presence"
     PARTNER_CHECKIN = "Partner Check-in"
+    RITUAL_COMPLETED = "Ritual Completed"
 
 class NotificationStatus(str, Enum):
     SCHEDULED = "Scheduled"

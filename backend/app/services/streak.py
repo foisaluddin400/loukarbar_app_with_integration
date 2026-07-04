@@ -9,6 +9,8 @@ from pymongo.errors import DuplicateKeyError
 from app.core.config import settings
 from app.services.streak_algo import get_local_now, calculate_streak, is_at_risk
 from app.schemas.ritual import RitualCompleteRequest
+from app.services.notification import notification_service
+from app.schemas.notification import NotificationCreate, NotificationType
 
 def get_time_name(hour: int) -> str:
     if 5 <= hour < 12:
@@ -80,6 +82,26 @@ class StreakSystem:
 
         # Now recalculate streak
         current_streak, longest_streak = await self._recalculate_streak(user_id, date_str)
+        
+        # Send notification to partner
+        user = await self.users_collection.find_one({"_id": ObjectId(user_id)})
+        if user and user.get("is_aligned") and user.get("partner"):
+            partner_id = user["partner"].get("user_id")
+            if partner_id:
+                try:
+                    await notification_service.schedule_notification(
+                        sender_id=user_id,
+                        payload=NotificationCreate(
+                            recipient_id=partner_id,
+                            title="Ritual Complete",
+                            message=f"{user.get('name', 'Your partner')} has completed their ritual.",
+                            type=NotificationType.RITUAL_COMPLETED,
+                            scheduled_for=datetime.now(timezone.utc),
+                            timezone=payload.timezone
+                        )
+                    )
+                except Exception as e:
+                    print(f"Failed to send ritual completion notification: {e}")
         
         return {
             "success": True,

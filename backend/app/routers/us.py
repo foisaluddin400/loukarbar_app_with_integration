@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from app.routers.auth import get_current_user
 from app.schemas.us import (
     UsResponse, UsStatsResponse, MilestoneCreate, MilestoneUpdate,
-    NextMeetCreate, NextMeetUpdate, NextMeetResponse
+    NextMeetCreate, NextMeetUpdate, NextMeetResponse, StartDateUpdate
 )
 from app.services.us import us_service
 
@@ -32,6 +32,22 @@ async def get_us_stats(current_user: dict = Depends(get_current_user)):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"An error occurred fetching relationship stats: {str(e)}"
         )
+
+# --- Start Date ---
+
+@router.patch("/start-date")
+async def update_start_date(payload: StartDateUpdate, current_user: dict = Depends(get_current_user)):
+    try:
+        result = await us_service.update_start_date(current_user["id"], payload.date)
+        return {
+            "success": True,
+            "message": "Start date updated successfully",
+            "data": result
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 # --- Milestone CRUD ---
 

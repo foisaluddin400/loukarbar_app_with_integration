@@ -80,3 +80,15 @@ class VibeInviteAcceptResponse(BaseModel):
     message: str
     partner_id: str
     partner_name: str
+
+class SyncCategoryStat(BaseModel):
+    count: int
+    target: int
+    percentage: int
+
+class SyncSummaryResponse(BaseModel):
+    overall_score: int
+    rituals: SyncCategoryStat
+    checkins: SyncCategoryStat
+    appreciations: SyncCategoryStat
+    threads: SyncCategoryStat

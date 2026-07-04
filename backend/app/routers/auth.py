@@ -236,9 +236,9 @@ async def get_me(current_user: dict = Depends(get_current_user)):
 
 @router.post("/delete-account")
 async def delete_me(payload: DeleteAccountRequest, current_user: dict = Depends(get_current_user)):
-    """Deletes current authenticated user's account from the database."""
+    """Deletes current authenticated user's account or specific side data from the database."""
     try:
-        await auth_service.delete_user(current_user["id"], payload.password)
+        await auth_service.delete_user(current_user["id"], payload.password, payload.target)
         return {
             "success": True,
             "message": "Account successfully deleted."

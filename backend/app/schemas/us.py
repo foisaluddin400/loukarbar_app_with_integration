@@ -3,6 +3,22 @@ from typing import List, Optional
 from datetime import datetime, date
 import re
 
+class StartDateUpdate(BaseModel):
+    date: str = Field(..., description="Date in mm.dd.yyyy format", examples=["11.14.2023"])
+
+    @field_validator("date")
+    @classmethod
+    def validate_date(cls, v: str) -> str:
+        if not re.match(r"^\d{2}[\.,]\d{2}[\.,]\d{4}$", v):
+            raise ValueError("Date must be in mm.dd.yyyy or mm.dd,yyyy format")
+        parts = re.split(r"[\.,]", v)
+        try:
+            month, day, year = int(parts[0]), int(parts[1]), int(parts[2])
+            date(year, month, day)
+        except ValueError:
+            raise ValueError("Invalid calendar date or format. Expected mm.dd.yyyy")
+        return v
+
 class Milestone(BaseModel):
     id: str
     title: str

@@ -18,6 +18,7 @@ import {
   deleteConnection,
   regenerateKey,
 } from "../../services/vibeCheckApi";
+import { deleteAccount } from "../../services/userApi";
 import * as Clipboard from "expo-clipboard";
 
 const API_BASE = 'http://localhost:8006';
@@ -35,6 +36,8 @@ const SamVibeNav: React.FC<SamVibeNavProps> = ({ onPartnerChange }) => {
   const [switchSheet, setSwitchSheet] = useState(false);
   const [connectSheet, setConnectSheet] = useState(false);
   const [requestsSheet, setRequestsSheet] = useState(false);
+  const [isDeleteDataOpen, setIsDeleteDataOpen] = useState(false);
+  const [deletePassword, setDeletePassword] = useState("");
 
   // Profile & connections state
   const [profile, setProfile] = useState<any>(null);
@@ -176,6 +179,22 @@ const SamVibeNav: React.FC<SamVibeNavProps> = ({ onPartnerChange }) => {
     } catch (error: any) {
       const msg = error.response?.data?.detail || error.message || "Failed to regenerate key.";
       Alert.alert("Error", msg);
+    }
+  };
+
+  const handleDeleteVibeData = async () => {
+    if (!deletePassword) return;
+    setConnectLoading(true);
+    try {
+      await deleteAccount(deletePassword, 'vibe_check');
+      setIsDeleteDataOpen(false);
+      setSettingsSheet(false);
+      navigation.reset({ index: 0, routes: [{ name: 'ModeSelector' }] });
+    } catch (error: any) {
+      console.error("Delete data failed", error);
+      Alert.alert("Error", error?.response?.data?.detail || "Could not delete data. Check your password.");
+    } finally {
+      setConnectLoading(false);
     }
   };
 
@@ -335,7 +354,7 @@ const SamVibeNav: React.FC<SamVibeNavProps> = ({ onPartnerChange }) => {
               </AppText>
             </Pressable>
 
-            <Pressable style={styles.blackCard}>
+            <Pressable style={styles.blackCard} onPress={() => navigation.navigate('AlignedApp')}>
               <AppText variant="heading" size={17} color="#fff">
                 Flip to aligned.
               </AppText>
@@ -343,7 +362,50 @@ const SamVibeNav: React.FC<SamVibeNavProps> = ({ onPartnerChange }) => {
                 The other side — for couples
               </AppText>
             </Pressable>
+
+            <Pressable style={[styles.menuItem, { borderColor: '#FF3B30' }]} onPress={() => { setSettingsSheet(false); setIsDeleteDataOpen(true); }}>
+              <AppText variant="heading" size={17} color="#FF3B30">
+                Delete Vibe Check Data
+              </AppText>
+              <AppText variant="mono" color={Colors.muted}>
+                Wipes vibe profile and scores
+              </AppText>
+            </Pressable>
           </View>
+        </View>
+      </BottomSheet>
+
+      {/* ==================== DELETE DATA BOTTOMSHEET ==================== */}
+      <BottomSheet
+        open={isDeleteDataOpen}
+        onClose={() => setIsDeleteDataOpen(false)}
+        title="Delete Vibe Check Data?"
+        kicker="DANGER ZONE"
+      >
+        <View>
+          <AppText style={{ marginBottom: 20, lineHeight: 22, color: Colors.ink2 }}>
+            This action cannot be undone. All your Vibe Check data, scores, and connections will be permanently deleted. Your Aligned data and login will remain intact. Please confirm your password.
+          </AppText>
+          <View style={{ marginBottom: 30 }}>
+            <AppTextInput 
+              label="Password" 
+              n="01" 
+              value={deletePassword} 
+              onChangeText={setDeletePassword} 
+              placeholder="Enter your password"
+              secureTextEntry
+            />
+          </View>
+          <AppButton 
+            variant="solid" 
+            size="lg" 
+            full 
+            onPress={handleDeleteVibeData} 
+            disabled={connectLoading || !deletePassword}
+            style={{ backgroundColor: '#FF3B30' }}
+          >
+            {connectLoading ? "Deleting..." : "Delete Vibe Check Data"}
+          </AppButton>
         </View>
       </BottomSheet>
 

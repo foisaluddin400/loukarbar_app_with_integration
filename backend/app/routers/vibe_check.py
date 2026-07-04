@@ -9,7 +9,7 @@ from app.schemas.vibe_check import (
     VibeCheckProfileCreate, VibeCheckProfileUpdate, VibeCheckProfileResponse, VibeCheckGenericResponse,
     VibeCheckConnectRequest, VibeCheckConnectionsResponse, VibeCheckRequestsResponse,
     VibeCheckRespondRequest, VibeInviteResponse, VibeInviteValidateResponse,
-    VibeInviteAcceptRequest, VibeInviteAcceptResponse
+    VibeInviteAcceptRequest, VibeInviteAcceptResponse, SyncSummaryResponse
 )
 from app.services.vibe_check import vibe_check_service
 import os
@@ -267,6 +267,16 @@ async def scan_qr_from_image(
             raise ValueError("No QR code found in the image.")
             
         return {"success": True, "message": data}
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/sync-summary", response_model=SyncSummaryResponse)
+async def get_sync_summary(timezone: str = "UTC", current_user: dict = Depends(get_current_user)):
+    """Get the combined sync score and breakdown for the user and their partner."""
+    try:
+        return await vibe_check_service.get_sync_summary(current_user["id"], timezone)
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:

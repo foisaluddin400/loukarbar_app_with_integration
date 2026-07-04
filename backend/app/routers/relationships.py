@@ -193,3 +193,14 @@ async def delete_photo(current_user: dict = Depends(get_current_user)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to delete photo: {str(e)}")
 
+@router.get("/sync-summary", status_code=status.HTTP_200_OK)
+async def get_aligned_sync_summary(timezone: str = "UTC", current_user: dict = Depends(get_current_user)):
+    """Get the combined sync score and breakdown for the user and their Aligned partner."""
+    try:
+        return await relationship_service.get_sync_summary(current_user["id"], timezone)
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get sync summary: {str(e)}")
+
+
