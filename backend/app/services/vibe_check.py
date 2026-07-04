@@ -208,13 +208,29 @@ class VibeCheckService:
         # Me -> Target
         await self.connections.update_one(
             {"user_id": user_id, "partner_id": target["user_id"]},
-            {"$setOnInsert": {"user_id": user_id, "partner_id": target["user_id"], "connected_at": now}},
+            {"$setOnInsert": {
+                "user_id": user_id, 
+                "partner_id": target["user_id"], 
+                "connected_at": now,
+                "current_journey_day": 1,
+                "status": "active",
+                "stalled_since": None,
+                "silent_partner_id": None
+            }},
             upsert=True
         )
         # Target -> Me
         await self.connections.update_one(
             {"user_id": target["user_id"], "partner_id": user_id},
-            {"$setOnInsert": {"user_id": target["user_id"], "partner_id": user_id, "connected_at": now}},
+            {"$setOnInsert": {
+                "user_id": target["user_id"], 
+                "partner_id": user_id, 
+                "connected_at": now,
+                "current_journey_day": 1,
+                "status": "active",
+                "stalled_since": None,
+                "silent_partner_id": None
+            }},
             upsert=True
         )
 
@@ -255,13 +271,29 @@ class VibeCheckService:
             # Recipient -> Sender
             await self.connections.update_one(
                 {"user_id": user_id, "partner_id": request["sender_id"]},
-                {"$setOnInsert": {"user_id": user_id, "partner_id": request["sender_id"], "connected_at": now}},
+                {"$setOnInsert": {
+                    "user_id": user_id, 
+                    "partner_id": request["sender_id"], 
+                    "connected_at": now,
+                    "current_journey_day": 1,
+                    "status": "active",
+                    "stalled_since": None,
+                    "silent_partner_id": None
+                }},
                 upsert=True
             )
             # Sender -> Recipient
             await self.connections.update_one(
                 {"user_id": request["sender_id"], "partner_id": user_id},
-                {"$setOnInsert": {"user_id": request["sender_id"], "partner_id": user_id, "connected_at": now}},
+                {"$setOnInsert": {
+                    "user_id": request["sender_id"], 
+                    "partner_id": user_id, 
+                    "connected_at": now,
+                    "current_journey_day": 1,
+                    "status": "active",
+                    "stalled_since": None,
+                    "silent_partner_id": None
+                }},
                 upsert=True
             )
             message = "Connection accepted."
@@ -389,13 +421,29 @@ class VibeCheckService:
         # Me -> Inviter
         await self.connections.update_one(
             {"user_id": user_id, "partner_id": invite["inviter_id"]},
-            {"$setOnInsert": {"user_id": user_id, "partner_id": invite["inviter_id"], "connected_at": now}},
+            {"$setOnInsert": {
+                "user_id": user_id, 
+                "partner_id": invite["inviter_id"], 
+                "connected_at": now,
+                "current_journey_day": 1,
+                "status": "active",
+                "stalled_since": None,
+                "silent_partner_id": None
+            }},
             upsert=True
         )
         # Inviter -> Me
         await self.connections.update_one(
             {"user_id": invite["inviter_id"], "partner_id": user_id},
-            {"$setOnInsert": {"user_id": invite["inviter_id"], "partner_id": user_id, "connected_at": now}},
+            {"$setOnInsert": {
+                "user_id": invite["inviter_id"], 
+                "partner_id": user_id, 
+                "connected_at": now,
+                "current_journey_day": 1,
+                "status": "active",
+                "stalled_since": None,
+                "silent_partner_id": None
+            }},
             upsert=True
         )
         
@@ -506,5 +554,43 @@ class VibeCheckService:
         await self.profiles.delete_one({"user_id": user_id})
         
         return {"success": True, "message": "VibeCheck profile and all related data deleted."}
+
+    async def release_connection(self, user_id: str, partner_id: str) -> Dict[str, Any]:
+        """Release a connection (e.g. after silent anchor wait)."""
+        now = datetime.now(timezone.utc)
+        await self.connections.update_many(
+            {"$or": [
+                {"user_id": user_id, "partner_id": partner_id},
+                {"user_id": partner_id, "partner_id": user_id}
+            ]},
+            {"$set": {"status": "released", "released_at": now}}
+        )
+        return {"success": True, "message": "Connection released."}
+
+    async def restore_connection(self, user_id: str, partner_id: str) -> Dict[str, Any]:
+        """Restore a released connection within 30 days."""
+        # Check if released_at is within 30 days
+        conn = await self.connections.find_one({"user_id": user_id, "partner_id": partner_id})
+        if not conn:
+            raise ValueError("Connection not found.")
+            
+        if conn.get("status") == "active":
+            return {"success": True, "message": "Connection is already active."}
+            
+        released_at = conn.get("released_at")
+        if released_at:
+            if released_at.tzinfo is None:
+                released_at = released_at.replace(tzinfo=timezone.utc)
+            if datetime.now(timezone.utc) - released_at > timedelta(days=30):
+                raise ValueError("Cannot restore connection after 30 days of release.")
+                
+        await self.connections.update_many(
+            {"$or": [
+                {"user_id": user_id, "partner_id": partner_id},
+                {"user_id": partner_id, "partner_id": user_id}
+            ]},
+            {"$set": {"status": "active", "stalled_since": None, "silent_partner_id": None}}
+        )
+        return {"success": True, "message": "Connection restored."}
 
 vibe_check_service = VibeCheckService()

@@ -8,6 +8,7 @@ class VibeQuestion(BaseModel):
     option_a: str
     option_b: str
     category: Optional[str] = "General"
+    is_anchor: bool = False
 
 class VibeAnswer(BaseModel):
     question_id: str
@@ -18,6 +19,7 @@ class VibeCardDaily(BaseModel):
     questions: List[VibeQuestion]
 
 class VibeAnswerSubmit(BaseModel):
+    partner_id: str
     answers: List[VibeAnswer]
     timezone: str = "UTC"
 
@@ -40,9 +42,9 @@ class VibeMatchedAnswer(BaseModel):
     option_a: str
     option_b: str
     my_selected_option: str  # "A" or "B"
-    partner_selected_option: str  # "A" or "B"
+    partner_selected_option: Optional[str] = None  # "A" or "B"
     my_answer: str
-    partner_answer: str
+    partner_answer: Optional[str] = None
     is_match: bool
 
 class VibeMatchResult(BaseModel):

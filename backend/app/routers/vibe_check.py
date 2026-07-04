@@ -151,6 +151,24 @@ async def delete_vibecheck_connection(partner_id: str, current_user: dict = Depe
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.post("/connections/{partner_id}/release", response_model=VibeCheckGenericResponse)
+async def release_connection(partner_id: str, current_user: dict = Depends(get_current_user)):
+    """Release a stalled connection."""
+    try:
+        return await vibe_check_service.release_connection(current_user["id"], partner_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/connections/{partner_id}/restore", response_model=VibeCheckGenericResponse)
+async def restore_connection(partner_id: str, current_user: dict = Depends(get_current_user)):
+    """Restore a released connection."""
+    try:
+        return await vibe_check_service.restore_connection(current_user["id"], partner_id)
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.post("/regenerate-key", response_model=VibeCheckGenericResponse)
 async def regenerate_vibecheck_key(current_user: dict = Depends(get_current_user)):
     """Generate a new unique Vibe Key for your profile."""

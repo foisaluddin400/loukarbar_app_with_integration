@@ -1,11 +1,6 @@
+import { SafeAreaView } from 'react-native-safe-area-context';
 import React, { useState } from "react";
-import {
-  View,
-  ScrollView,
-  StyleSheet,
-  SafeAreaView,
-  Pressable,
-} from "react-native";
+import { View, ScrollView, StyleSheet, Pressable } from 'react-native';
 import { Colors } from "../../constants/colors";
 import { AppText } from "../../components/ui/AppText";
 import { AppButton } from "../../components/ui/AppButton";

@@ -22,9 +22,10 @@ import {
   getVibeProfile,
   updateVibeProfile,
   uploadProfilePicture,
-  deleteProfilePicture,
   deleteVibeProfile,
   regenerateKey,
+  getConnections,
+  restoreConnection
 } from '../../services/vibeCheckApi';
 import { signoutUser } from '../../services/authApi';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -59,11 +60,19 @@ export const VCProfileScreen: React.FC = () => {
   const [deleteSheet, setDeleteSheet] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
+  // Connections
+  const [connectionsSheet, setConnectionsSheet] = useState(false);
+  const [connections, setConnections] = useState<any[]>([]);
+
   const fetchProfile = async () => {
     try {
       setLoading(true);
-      const data = await getVibeProfile();
+      const [data, connData] = await Promise.all([
+         getVibeProfile(),
+         getConnections()
+      ]);
       setProfile(data);
+      if (connData?.data) setConnections(connData.data);
     } catch (error) {
       console.log('Error fetching vibe profile:', error);
     } finally {
@@ -236,6 +245,16 @@ export const VCProfileScreen: React.FC = () => {
     ]);
   };
 
+  const handleRestoreConnection = async (partnerId: string) => {
+    try {
+      await restoreConnection(partnerId);
+      Alert.alert("Restored", "Connection has been restored.");
+      fetchProfile();
+    } catch (e: any) {
+      Alert.alert("Error", e.message || "Failed to restore connection.");
+    }
+  };
+
   // ─── Render ────────────────────────────────────────────────
 
   if (loading) {
@@ -346,6 +365,19 @@ export const VCProfileScreen: React.FC = () => {
           <AppText variant="smallCaps" color={Colors.ink2} style={{ marginBottom: 12, marginTop: 8 }}>
             MANAGE
           </AppText>
+
+          <Pressable
+            style={styles.menuItem}
+            onPress={() => setConnectionsSheet(true)}
+          >
+            <View>
+              <AppText variant="heading" size={17}>Manage connections</AppText>
+              <AppText variant="mono" color={Colors.muted} style={{ fontSize: 10, marginTop: 2 }}>
+                VIEW ACTIVE AND RESTORE RELEASED
+              </AppText>
+            </View>
+            <AppText color={Colors.accent}>→</AppText>
+          </Pressable>
 
           <Pressable
             style={styles.menuItem}
@@ -506,6 +538,43 @@ export const VCProfileScreen: React.FC = () => {
             CANCEL
           </AppButton>
         </View>
+      </BottomSheet>
+
+      {/* ==================== CONNECTIONS SHEET ==================== */}
+      <BottomSheet
+        open={connectionsSheet}
+        onClose={() => setConnectionsSheet(false)}
+        kicker="NETWORK"
+        title="Your Connections"
+      >
+        <ScrollView style={{ maxHeight: 400 }}>
+          {connections.length === 0 ? (
+            <AppText color={Colors.muted} style={{ textAlign: 'center', marginTop: 20 }}>
+              No connections found.
+            </AppText>
+          ) : (
+            connections.map((conn, idx) => {
+              const isReleased = conn.status === "released";
+              return (
+                <View key={idx} style={[styles.menuItem, { backgroundColor: isReleased ? `${Colors.cream}50` : Colors.cream }]}>
+                  <View style={{ flex: 1 }}>
+                    <AppText variant="heading" size={17} color={isReleased ? Colors.muted : Colors.ink}>
+                      {conn.partner_name || conn.partner_id}
+                    </AppText>
+                    <AppText variant="mono" color={Colors.muted} style={{ fontSize: 10, marginTop: 2 }}>
+                      {isReleased ? "RELEASED" : `ACTIVE • DAY ${conn.current_journey_day || 1}`}
+                    </AppText>
+                  </View>
+                  {isReleased && (
+                    <AppButton variant="outline" size="sm" onPress={() => handleRestoreConnection(conn.partner_id)}>
+                      RESTORE
+                    </AppButton>
+                  )}
+                </View>
+              );
+            })
+          )}
+        </ScrollView>
       </BottomSheet>
 
       {/* ==================== QR CODE SHEET ==================== */}

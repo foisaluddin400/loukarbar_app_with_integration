@@ -22,13 +22,14 @@ import { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
 import {
   getVibeProfile,
   getDailyCards,
-  getVibeStreak,
   submitVibeAnswers,
-  getVibeResults
+  getVibeResults,
+  getConnections,
+  releaseConnection
 } from "../../services/vibeCheckApi";
 import api from "../../services/api";
 
-const DAILY_LIMIT = 12;
+const DAILY_LIMIT = 3;
 
 const CLOSING_MESSAGES = [
   "Come back tomorrow. The slowness is the point.",
@@ -61,6 +62,7 @@ export const PlayScreen: React.FC = () => {
   const [allResults, setAllResults] = useState<any[]>([]);
   
   const [activePartners, setActivePartners] = useState<any[]>([]);
+  const [connectionsList, setConnectionsList] = useState<any[]>([]);
   const [partnerName, setPartnerName] = useState("Partner");
   const [partnerId, setPartnerId] = useState<string | null>(null);
   const [myUserId, setMyUserId] = useState<string | null>(null);
@@ -79,41 +81,85 @@ export const PlayScreen: React.FC = () => {
   useEffect(() => {
     async function loadData() {
       try {
-        const [profile, streakData, dailyData, resultsData] = await Promise.all([
+        const [profile, streakData, connsData] = await Promise.all([
           getVibeProfile().catch(() => null),
           getVibeStreak().catch(() => ({ current_streak: 0, cards_answered_today: 0 })),
-          getDailyCards().catch(() => ({ questions: [] })),
-          getVibeResults().catch(() => ({ data: [] }))
+          getConnections().catch(() => ({ data: [] }))
         ]);
 
         const allPartners = [...(profile?.active_users || []), ...(profile?.inactive_users || [])];
         if (profile) setMyUserId(profile.user_id);
+        if (connsData?.data) setConnectionsList(connsData.data);
+        
+        let currentPId = partnerId;
+        let currentPName = "Partner";
         if (allPartners.length > 0) {
           setActivePartners(allPartners);
           
-          // Use explicitly selected partner if it exists, otherwise default to first
-          const currentPId = partnerId || allPartners[0].user_id;
-          const currentPName = partnerId ? (allPartners.find((p: any) => p.user_id === partnerId)?.name || "Partner") : (allPartners[0].name || "Partner");
+          currentPId = partnerId || allPartners[0].user_id;
+          currentPName = partnerId ? (allPartners.find((p: any) => p.user_id === partnerId)?.name || "Partner") : (allPartners[0].name || "Partner");
           
           setPartnerName(currentPName);
           if (!partnerId) {
             setPartnerId(currentPId);
           }
 
-          // Fetch results for all partners
+          const [dailyData, resultsData] = await Promise.all([
+            getDailyCards(currentPId).catch((e: any) => {
+              console.log("Error in getDailyCards:", e);
+              setDebugText("DailyCards Error: " + (e.message || String(e)));
+              return { questions: [] };
+            }),
+            getVibeResults(currentPId).catch((e: any) => {
+              console.log("Error in getVibeResults:", e);
+              setDebugText(prev => prev + " | Results Error: " + (e.message || String(e)));
+              return { data: [] };
+            })
+          ]);
+          
+          if (!dailyData?.questions || dailyData.questions.length === 0) {
+              setDebugText(prev => prev + " | Info: dailyData.questions is empty");
+          }
+          
           setAllResults(resultsData?.data || []);
           
-          // Match rate for currently selected partner
+          let partnerCardsAnsweredToday = 0;
           const currentPartnerResult = resultsData?.data?.find((r: any) => r.partner_name === currentPName);
           if (currentPartnerResult) {
              setMatchRate(currentPartnerResult.cumulative_match_percent || 0);
+             
+             // Count how many of today's cards I have answered
+             if (dailyData?.questions) {
+                 partnerCardsAnsweredToday = dailyData.questions.filter((q: any) => 
+                     currentPartnerResult.matched_answers?.some((a: any) => a.question_id === q.id && a.my_selected_option)
+                 ).length;
+             }
           }
+          setCardsAnsweredToday(partnerCardsAnsweredToday);
+          
+          // Pre-populate myPick and theirPick if I've already answered the current card today
+          if (dailyData?.questions?.length > 0 && currentPartnerResult) {
+             const firstUnansweredIndex = partnerCardsAnsweredToday < 3 ? partnerCardsAnsweredToday : 2;
+             const cardToPrePopulate = dailyData.questions[firstUnansweredIndex]?.id;
+             const matchedAns = currentPartnerResult.matched_answers?.find((a: any) => a.question_id === cardToPrePopulate);
+             if (matchedAns?.my_selected_option) {
+                 setMyPick(matchedAns.my_selected_option.toLowerCase() as "a" | "b");
+                 if (matchedAns.partner_selected_option) {
+                     setTheirPick(matchedAns.partner_selected_option.toLowerCase() as "a" | "b");
+                     setRevealed(true);
+                 } else {
+                     setTheirPick(null);
+                     setRevealed(false);
+                 }
+             }
+          }
+          setDailyCards(dailyData?.questions || []);
+          
         }
         
         setStreak(streakData?.current_streak || 0);
-        setCardsAnsweredToday(streakData?.cards_answered_today || 0);
-        setDailyCards(dailyData?.questions || []);
-
+      } catch (err) {
+        console.log("Error loading PlayScreen data:", err);
       } finally {
         setLoading(false);
       }
@@ -138,7 +184,7 @@ export const PlayScreen: React.FC = () => {
         if (cancelled) return;
         try {
           setDebugText(`Polling... partnerId=${currentPartnerId}`);
-          const results = await getVibeResults();
+          const results = await getVibeResults(currentPartnerId);
           if (cancelled) return;
           
           if (results?.data) {
@@ -229,12 +275,13 @@ export const PlayScreen: React.FC = () => {
 
     try {
       const option = pick === "a" ? "A" : "B";
+      if (!partnerId) return;
       // Submit single answer to backend
-      await submitVibeAnswers([{ question_id: card.id, selected_option: option }]);
+      await submitVibeAnswers(partnerId, [{ question_id: card.id, selected_option: option }]);
       
       // Check if partner answered
       let foundMatch = false;
-      const results = await getVibeResults();
+      const results = await getVibeResults(partnerId);
       if (results?.data) {
           setAllResults(results.data);
           const partnerData = results.data.find((r: any) => r.partner_name === partnerName);
@@ -270,11 +317,41 @@ export const PlayScreen: React.FC = () => {
     setLocalIndex(0);
   };
 
+  const handleRelease = async () => {
+    if (!partnerId) return;
+    try {
+      await releaseConnection(partnerId);
+      alert("Connection released. You can restore it from the Connections tab within 30 days.");
+      navigation.navigate("Connections");
+    } catch (e: any) {
+      alert("Failed to release: " + e.message);
+    }
+  };
+
   const nextCard = () => {
     setLocalIndex(prev => prev + 1);
     setMyPick(null);
     setTheirPick(null);
     setRevealed(false);
+    
+    // Pre-populate the NEXT card if already answered
+    const nextCardData = dailyCards[currentCardIndex + 1];
+    if (nextCardData && allResults.length > 0) {
+       const partnerData = allResults.find((r: any) => r.partner_name === partnerName);
+       if (partnerData) {
+           const matchedAns = partnerData.matched_answers?.find((a: any) => a.question_id === nextCardData.id);
+           if (matchedAns?.my_selected_option) {
+               setMyPick(matchedAns.my_selected_option.toLowerCase() as "a" | "b");
+               if (matchedAns.partner_selected_option) {
+                   setTheirPick(matchedAns.partner_selected_option.toLowerCase() as "a" | "b");
+                   setRevealed(true);
+               } else {
+                   setTheirPick(null);
+                   setRevealed(false);
+               }
+           }
+       }
+    }
   };
 
   if (loading) {
@@ -347,6 +424,22 @@ export const PlayScreen: React.FC = () => {
         </View>
 
         <View style={styles.inner}>
+          {/* Progress Bar */}
+          {(() => {
+             const conn = connectionsList.find(c => c.partner_id === partnerId);
+             const currentDay = conn?.current_journey_day || 1;
+             return (
+               <View style={{ marginBottom: 24 }}>
+                 <AppText variant="smallCaps" color={Colors.muted} style={{ marginBottom: 8, textAlign: 'center' }}>
+                   Day {currentDay} of 90
+                 </AppText>
+                 <View style={{ height: 4, backgroundColor: Colors.rule, borderRadius: 2, overflow: 'hidden' }}>
+                   <View style={{ height: '100%', backgroundColor: Colors.accent, width: `${(currentDay / 90) * 100}%` }} />
+                 </View>
+               </View>
+             );
+          })()}
+
           {limitReached ? (
             <View style={styles.limitCard}>
               <AppText
@@ -439,15 +532,43 @@ export const PlayScreen: React.FC = () => {
                   Pick to lock in.
                 </AppText>
               )}
-              {myPick && !revealed && (
-                <AppText
-                  variant="smallCaps"
-                  color={Colors.accent}
-                  style={{ textAlign: "center", marginBottom: 24 }}
-                >
-                  Waiting for reveal...
-                </AppText>
-              )}
+              
+              {myPick && !revealed && (() => {
+                 const conn = connectionsList.find(c => c.partner_id === partnerId);
+                 const stalledSince = conn?.stalled_since ? new Date(conn.stalled_since) : null;
+                 const stalledDays = stalledSince ? Math.floor((Date.now() - stalledSince.getTime()) / 86400000) : 0;
+                 const isStalled = card.is_anchor && stalledSince;
+
+                 if (isStalled) {
+                     return (
+                         <View style={{ marginBottom: 24, alignItems: "center", backgroundColor: `${Colors.accent}10`, padding: 20, borderRadius: 14, borderWidth: 1, borderColor: `${Colors.accent}30` }}>
+                             <AppText variant="smallCaps" color={Colors.accent} style={{ textAlign: "center", marginBottom: 12 }}>
+                                 Anchor Point Reached
+                             </AppText>
+                             <AppText variant="serifItalic" color={Colors.ink} style={{ textAlign: "center", marginBottom: 16 }}>
+                                 {stalledDays >= 4 
+                                     ? "Still holding. Answer it, or release the connection." 
+                                     : `Waiting on ${partnerName}...`}
+                             </AppText>
+                             {stalledDays >= 4 && (
+                                 <AppButton variant="outline" onPress={handleRelease} style={{ borderColor: Colors.accent }}>
+                                     <AppText color={Colors.accent}>Release Connection</AppText>
+                                 </AppButton>
+                             )}
+                         </View>
+                     );
+                 }
+
+                 return (
+                    <AppText
+                      variant="smallCaps"
+                      color={Colors.accent}
+                      style={{ textAlign: "center", marginBottom: 24 }}
+                    >
+                      Waiting for reveal...
+                    </AppText>
+                 );
+              })()}
               {revealed && (
                 <View style={{ marginBottom: 24, gap: 12 }}>
                   {activePartners.map((partner) => {
@@ -568,6 +689,13 @@ export const PlayScreen: React.FC = () => {
             View History
           </AppButton>
 
+          <View style={{ backgroundColor: 'black', padding: 10, margin: 10 }}>
+            <AppText style={{ color: 'white', fontSize: 10 }}>
+              DEBUG: currentPId: {partnerId} | limitReached: {limitReached ? "yes" : "no"} | cardsAnsweredToday: {cardsAnsweredToday} | dailyCardsLen: {dailyCards.length} | localIndex: {localIndex} | err: {debugText} | hasCard: {card ? "yes" : "no"} | activeParts: {activePartners.length} 
+            </AppText>
+          </View>
+
+          <AppText style={{ color: 'red', textAlign: 'center', marginTop: 20 }}>{debugText}</AppText>
 
           <View style={{ height: 80 }} />
         </View>

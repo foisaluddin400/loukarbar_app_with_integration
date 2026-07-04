@@ -73,11 +73,12 @@ async def get_vibe_card_history(
 
 @router.get("/daily", response_model=VibeCardDaily)
 async def get_daily_cards(
+    partner_id: str = Query(..., description="The ID of the connected partner for this journey"),
     timezone: str = Query("UTC"),
     current_user: dict = Depends(get_current_user)
 ):
     """Fetch today's 3 'This or That' questions."""
-    questions = await vibe_card_service.get_daily_questions(current_user["id"], timezone)
+    questions = await vibe_card_service.get_daily_questions(current_user["id"], partner_id)
     from datetime import datetime
     import zoneinfo
     try:

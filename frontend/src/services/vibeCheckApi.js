@@ -4,13 +4,18 @@ import api from './api';
 
 // ─── Profile & Status ─────────────────────────────────────────
 
+export const getVibeStreak = async () => {
+  const response = await api.get(`/vibecheck/streak?_t=${Date.now()}`);
+  return response.data;
+};
+
 export const checkVibeStatus = async () => {
   const response = await api.get('/vibecheck/check');
   return response.data;
 };
 
 export const getVibeProfile = async () => {
-  const response = await api.get('/vibecheck/profile');
+  const response = await api.get(`/vibecheck/profile?_t=${Date.now()}`);
   return response.data;
 };
 
@@ -46,7 +51,7 @@ export const connectWithKey = async (vibe_key) => {
 // ─── Connections & Requests ───────────────────────────────────
 
 export const getConnections = async () => {
-  const response = await api.get('/vibecheck/connections');
+  const response = await api.get(`/vibecheck/connections?_t=${Date.now()}`);
   return response.data;
 };
 
@@ -62,6 +67,16 @@ export const respondToRequest = async (request_id, accept) => {
 
 export const deleteConnection = async (partner_id) => {
   const response = await api.delete(`/vibecheck/connection/${partner_id}`);
+  return response.data;
+};
+
+export const releaseConnection = async (partner_id) => {
+  const response = await api.post(`/vibecheck/connections/${partner_id}/release`);
+  return response.data;
+};
+
+export const restoreConnection = async (partner_id) => {
+  const response = await api.post(`/vibecheck/connections/${partner_id}/restore`);
   return response.data;
 };
 
@@ -141,14 +156,14 @@ export const getVibeCardHistory = async (partner_id, category = "All", page = 1,
   return response.data;
 };
 
-export const getDailyCards = async (timezone = "UTC") => {
-  const params = new URLSearchParams({ timezone });
+export const getDailyCards = async (partner_id, timezone = "UTC") => {
+  const params = new URLSearchParams({ partner_id, timezone, _t: Date.now().toString() });
   const response = await api.get(`/vibecheck/cards/daily?${params.toString()}`);
   return response.data;
 };
 
-export const submitVibeAnswers = async (answers, timezone = "UTC") => {
-  const response = await api.post('/vibecheck/cards/answer', { answers, timezone });
+export const submitVibeAnswers = async (partner_id, answers, timezone = "UTC") => {
+  const response = await api.post('/vibecheck/cards/answer', { partner_id, answers, timezone });
   return response.data;
 };
 
