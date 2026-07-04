@@ -50,23 +50,27 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str):
 @router.get("/history", response_model=VibeHistoryPaginatedResponse)
 async def get_vibe_card_history(
     partner_id: Optional[str] = Query(None),
-    category: str = Query("All", enum=["All", "Matched", "Differed"]),
+    category: str = Query("All"),
+    search_term: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
-    size: int = Query(20, ge=1, le=100),
+    size: int = Query(20, ge=1),
     current_user: dict = Depends(get_current_user)
 ):
     """Fetch history of answers between user and partners. If partner_id is not provided, shows all partners."""
     try:
-        data, total = await vibe_card_service.get_history(
-            current_user["id"], partner_id, category, page, size
+        data, total, total_matched, total_differed = await vibe_card_service.get_history(
+            current_user["id"], partner_id, category, search_term, page, size
         )
         return VibeHistoryPaginatedResponse(
-            success=True,
-            data=data,
-            total=total,
-            page=page,
-            size=size,
-            category=category
+            success=True, 
+            data=data, 
+            total=total, 
+            page=page, 
+            size=size, 
+            category=category,
+            search_term=search_term,
+            total_matched=total_matched,
+            total_differed=total_differed
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -125,7 +129,7 @@ async def get_vibe_results(
 ):
     """Compare today's results with partners. If partner_id is not provided, shows all connected partners who answered today."""
     try:
-        results = await vibe_card_service.get_match_results(current_user["id"], partner_id, timezone)
+        results = await vibe_card_service.get_match_results(current_user["id"], partner_id)
         return VibeMultiMatchResult(success=True, data=results)
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))
@@ -138,4 +142,4 @@ async def get_vibe_streak(
     current_user: dict = Depends(get_current_user)
 ):
     """Get your current Vibe Card answering streak."""
-    return await vibe_card_service.get_streak(current_user["id"], timezone)
+    return await vibe_card_service.get_streak(current_user["id"])

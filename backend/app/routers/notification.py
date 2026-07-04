@@ -41,3 +41,17 @@ async def mark_notification_seen(notification_id: str, current_user: dict = Depe
     if not success:
         raise HTTPException(status_code=404, detail="Notification not found.")
     return GenericResponse(success=True, message="Notification marked as seen.")
+
+@router.delete("/", response_model=GenericResponse)
+async def clear_all_notifications(current_user: dict = Depends(get_current_user)):
+    """Clear all notifications for the user."""
+    count = await notification_service.clear_all_notifications(current_user["id"])
+    return GenericResponse(success=True, message=f"Cleared {count} notifications.")
+
+@router.delete("/{notification_id}", response_model=GenericResponse)
+async def delete_notification(notification_id: str, current_user: dict = Depends(get_current_user)):
+    """Delete a specific notification."""
+    success = await notification_service.delete_notification(notification_id, current_user["id"])
+    if not success:
+        raise HTTPException(status_code=404, detail="Notification not found.")
+    return GenericResponse(success=True, message="Notification deleted.")

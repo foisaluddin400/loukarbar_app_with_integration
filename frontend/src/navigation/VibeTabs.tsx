@@ -1,10 +1,11 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, DeviceEventEmitter } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { VibeTabParamList } from '../types';
 import { Colors } from '../constants/colors';
 import { Fonts } from '../constants/fonts';
+import { getPendingDatesCount } from '../services/vibeCheckApi';
 
 import { PlayScreen } from '../screens/vibecheck/PlayScreen';
 import { VCDatesScreen } from '../screens/vibecheck/VCDatesScreen';
@@ -22,6 +23,23 @@ const NAV_ITEMS = [
 
 export function VibeTabs() {
   const insets = useSafeAreaInsets();
+  const [pendingDatesCount, setPendingDatesCount] = useState(0);
+
+  const fetchPendingDates = async () => {
+    try {
+      const res = await getPendingDatesCount();
+      if (res?.success) setPendingDatesCount(res.count);
+    } catch (e) {
+      console.log('Failed to fetch pending dates count', e);
+    }
+  };
+
+  useEffect(() => {
+    fetchPendingDates();
+    const sub = DeviceEventEmitter.addListener('REFRESH_VIBE_DATA', fetchPendingDates);
+    return () => sub.remove();
+  }, []);
+
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
@@ -39,6 +57,11 @@ export function VibeTabs() {
             <View style={styles.iconWrap}>
               {focused && <View style={styles.indicator} />}
               <Text style={[styles.mark, { color }]}>{item?.mark}</Text>
+              {route.name === 'VCDates' && pendingDatesCount > 0 && (
+                <View style={styles.badge}>
+                  <Text style={styles.badgeText}>{pendingDatesCount}</Text>
+                </View>
+              )}
             </View>
           );
         },
@@ -68,4 +91,19 @@ const styles = StyleSheet.create({
   },
   mark: { fontSize: 15, lineHeight: 20 },
   label: { fontFamily: Fonts.mono, fontSize: 9, letterSpacing: 1, marginTop: 2 },
+  badge: {
+    position: 'absolute',
+    top: -8,
+    right: -10,
+    backgroundColor: Colors.accent,
+    minWidth: 14,
+    height: 14,
+    borderRadius: 7,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: Colors.bone,
+    paddingHorizontal: 2
+  },
+  badgeText: { color: '#fff', fontSize: 8, fontWeight: 'bold' }
 });

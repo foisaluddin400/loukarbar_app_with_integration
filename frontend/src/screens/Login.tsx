@@ -1,7 +1,7 @@
 import { SafeAreaView } from 'react-native-safe-area-context';
 import React, { useState } from 'react';
 import { View, StyleSheet, ScrollView, Alert, Pressable } from 'react-native';
-import { useNavigation, NavigationProp } from '@react-navigation/native';
+import { useNavigation, NavigationProp, useRoute, RouteProp } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors } from '../constants/colors';
 import { AppText } from '../components/ui/AppText';
@@ -10,12 +10,15 @@ import { AppTextInput } from '../components/ui/AppTextInput';
 import { RootStackParamList } from '../types';
 import { loginUser } from '../services/authApi';
 
+type LoginRouteProp = RouteProp<RootStackParamList, 'Login'>;
+
 const Login = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
+  const route = useRoute<LoginRouteProp>();
 
   const handleLogin = async () => {
     setErrorMsg('');
@@ -28,7 +31,9 @@ const Login = () => {
       const data = await loginUser(email, password);
       await AsyncStorage.setItem('access_token', data.access_token);
       await AsyncStorage.setItem('refresh_token', data.refresh_token);
-      navigation.navigate('ModeSelector');
+      
+      const returnTo = route.params?.returnTo;
+      navigation.navigate('ModeSelector', { autoSelect: returnTo });
     } catch (error: any) {
       let errorMessage = error.response?.data?.detail || error.message || 'An error occurred during login.';
       if (errorMessage.toLowerCase() === 'network error') {

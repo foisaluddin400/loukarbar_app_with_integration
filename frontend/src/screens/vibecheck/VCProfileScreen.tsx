@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   Platform,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
@@ -25,7 +26,8 @@ import {
   deleteVibeProfile,
   regenerateKey,
   getConnections,
-  restoreConnection
+  restoreConnection,
+  connectWithKey,
 } from '../../services/vibeCheckApi';
 import { signoutUser } from '../../services/authApi';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -33,10 +35,17 @@ import * as ImagePicker from 'expo-image-picker';
 import * as Clipboard from 'expo-clipboard';
 import QRCode from 'react-native-qrcode-svg';
 
+let CameraView: any = null;
+let useCameraPermissions: any = () => [null, async () => {}];
+if (Platform.OS !== "web") {
+  const ExpoCamera = require("expo-camera");
+  CameraView = ExpoCamera.CameraView;
+  useCameraPermissions = ExpoCamera.useCameraPermissions;
+}
 
 type Nav = StackNavigationProp<RootStackParamList>;
 
-const API_BASE = 'http://localhost:8006';
+const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL;
 
 export const VCProfileScreen: React.FC = () => {
   const nav = useNavigation<Nav>();
@@ -56,9 +65,20 @@ export const VCProfileScreen: React.FC = () => {
   const [pictureSheet, setPictureSheet] = useState(false);
   const [uploading, setUploading] = useState(false);
 
+  // Connect state
+  const [connectKey, setConnectKey] = useState('');
+  const [connecting, setConnecting] = useState(false);
+
+  // Scanner state
+  const [scannerSheet, setScannerSheet] = useState(false);
+  const [permission, requestPermission] = useCameraPermissions();
+
   // Delete confirmation
   const [deleteSheet, setDeleteSheet] = useState(false);
   const [deleting, setDeleting] = useState(false);
+
+  // Sign out confirmation
+  const [signoutSheet, setSignoutSheet] = useState(false);
 
   // Connections
   const [connectionsSheet, setConnectionsSheet] = useState(false);
@@ -177,10 +197,35 @@ export const VCProfileScreen: React.FC = () => {
   };
 
   const handleCopyKey = async () => {
-    if (profile?.vibe_key) {
-      await Clipboard.setStringAsync(profile.vibe_key);
-      Alert.alert('Copied', 'Vibe Key copied to clipboard.');
+    if (!profile?.vibe_key) return;
+    await Clipboard.setStringAsync(profile.vibe_key);
+    Alert.alert('Copied', 'Vibe Key copied to clipboard.');
+  };
+
+  const handleConnect = async () => {
+    if (!connectKey.trim()) {
+      Alert.alert('Missing Key', 'Please enter a Vibe Key.');
+      return;
     }
+    try {
+      setConnecting(true);
+      await connectWithKey(connectKey.trim());
+      setConnectKey('');
+      Alert.alert('Request Sent', 'A connection request has been sent.');
+    } catch (error: any) {
+      const msg = error.response?.data?.detail || error.message || 'Failed to connect.';
+      Alert.alert('Error', msg);
+    } finally {
+      setConnecting(false);
+    }
+  };
+
+  const handleBarcodeScanned = ({ type, data }: { type: string; data: string }) => {
+    setScannerSheet(false);
+    setConnectKey(data);
+    setTimeout(() => {
+       handleConnect();
+    }, 500); 
   };
 
   const handleDownloadQR = () => {
@@ -202,7 +247,6 @@ export const VCProfileScreen: React.FC = () => {
               })
               .catch(() => Alert.alert('Error', 'Failed to download QR code.'));
           } else {
-            // For now, native download is disabled to test Web stability
             Alert.alert('Notice', 'Mobile download is temporarily disabled for testing.');
           }
         } catch (e: any) {
@@ -228,21 +272,20 @@ export const VCProfileScreen: React.FC = () => {
     }
   };
 
-  const handleSignout = async () => {
-    Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Sign Out', style: 'destructive', onPress: async () => {
-          try {
-            setLoading(true);
-            await signoutUser().catch(() => {});
-            await AsyncStorage.multiRemove(['access_token', 'refresh_token']);
-            nav.reset({ index: 0, routes: [{ name: 'ModeSelector' }] });
-          } catch (e) {
-             Alert.alert('Error', 'Failed to sign out locally.');
-             setLoading(false);
-          }
-      }}
-    ]);
+  const performSignout = async (route: 'ModeSelector' | 'Login') => {
+    try {
+      setLoading(true);
+      await signoutUser().catch(() => {});
+      await AsyncStorage.multiRemove(['access_token', 'refresh_token']);
+      nav.reset({ index: 0, routes: [{ name: route }] });
+    } catch (e) {
+       Alert.alert('Error', 'Failed to sign out locally.');
+       setLoading(false);
+    }
+  };
+
+  const handleSignout = () => {
+    setSignoutSheet(true);
   };
 
   const handleRestoreConnection = async (partnerId: string) => {
@@ -341,6 +384,29 @@ export const VCProfileScreen: React.FC = () => {
               </AppButton>
               <AppButton variant="outline" size="sm" style={{ flex: 1 }} onPress={handleRegenerateKey}>
                 REGENERATE
+              </AppButton>
+            </View>
+          </View>
+
+          {/* Connect with Vibe Key Card */}
+          <View style={[styles.keyCard, { marginTop: 16 }]}>
+            <AppText variant="smallCaps" color={Colors.muted} style={{ marginBottom: 8 }}>
+              CONNECT WITH KEY
+            </AppText>
+            <AppTextInput
+              label="Enter a friend's Vibe Key"
+              n="01"
+              value={connectKey}
+              onChangeText={setConnectKey}
+              placeholder="e.g. VIBE-k7d2x"
+              autoCapitalize="none"
+            />
+            <View style={{ flexDirection: 'row', gap: 8, marginTop: 14 }}>
+              <AppButton variant="solid" size="sm" style={{ flex: 1, backgroundColor: Colors.accent }} onPress={handleConnect} disabled={connecting}>
+                {connecting ? "SENDING..." : "SEND REQUEST"}
+              </AppButton>
+              <AppButton variant="outline" size="sm" style={{ flex: 1 }} onPress={() => setScannerSheet(true)}>
+                SCAN QR
               </AppButton>
             </View>
           </View>
@@ -500,6 +566,60 @@ export const VCProfileScreen: React.FC = () => {
         </View>
       </BottomSheet>
 
+      {/* ==================== SIGNOUT CONFIRMATION SHEET ==================== */}
+      <BottomSheet
+        open={signoutSheet}
+        onClose={() => setSignoutSheet(false)}
+        kicker="SIGN OUT OR SWITCH"
+        title="Where to?"
+      >
+        <View>
+          <View style={styles.warningCard}>
+            <AppText variant="serifItalic" size={14} color="#ccc" style={{ lineHeight: 22 }}>
+              Do you want to completely log out of your account, or just switch to the Mode Selector?
+            </AppText>
+          </View>
+
+          <AppButton
+            full
+            variant="solid"
+            size="lg"
+            style={{ marginBottom: 10 }}
+            onPress={() => {
+              setSignoutSheet(false);
+              nav.reset({ index: 0, routes: [{ name: 'ModeSelector' }] });
+            }}
+            disabled={loading}
+          >
+            SWITCH TO MODE SELECTOR
+          </AppButton>
+
+          <AppButton
+            full
+            variant="solid"
+            size="lg"
+            style={{ backgroundColor: Colors.accent, marginBottom: 10 }}
+            onPress={() => {
+              setSignoutSheet(false);
+              performSignout('Login');
+            }}
+            disabled={loading}
+          >
+            {loading ? 'SIGNING OUT...' : 'SIGN IN PAGE'}
+          </AppButton>
+
+          <AppButton
+            full
+            variant="outline"
+            size="lg"
+            onPress={() => setSignoutSheet(false)}
+            disabled={loading}
+          >
+            CANCEL
+          </AppButton>
+        </View>
+      </BottomSheet>
+
       {/* ==================== DELETE CONFIRMATION SHEET ==================== */}
       <BottomSheet
         open={deleteSheet}
@@ -605,6 +725,48 @@ export const VCProfileScreen: React.FC = () => {
           <AppText variant="serifItalic" size={14} color={Colors.muted} style={{ marginTop: 16, textAlign: 'center' }}>
             Let your friend scan this code to connect instantly.
           </AppText>
+        </View>
+      </BottomSheet>
+
+      {/* ==================== SCANNER SHEET ==================== */}
+      <BottomSheet
+        open={scannerSheet}
+        onClose={() => setScannerSheet(false)}
+        kicker="SCAN"
+        title="Scan QR Code"
+        dark
+      >
+        <View style={{ alignItems: 'center' }}>
+          {Platform.OS !== 'web' ? (
+            permission?.granted ? (
+              <View style={styles.cameraContainer}>
+                <CameraView
+                  style={styles.camera}
+                  onBarcodeScanned={handleBarcodeScanned}
+                  barcodeScannerSettings={{
+                    barcodeTypes: ['qr'],
+                  }}
+                />
+                <View style={styles.scannerOverlay}>
+                  <View style={styles.scannerFrame} />
+                </View>
+              </View>
+            ) : (
+              <View style={[styles.cameraContainer, { justifyContent: 'center', backgroundColor: '#333' }]}>
+                <AppText color="#fff">Camera permission is required.</AppText>
+                <AppButton variant="solid" size="sm" onPress={requestPermission} style={{ marginTop: 16 }}>
+                  Grant Permission
+                </AppButton>
+              </View>
+            )
+          ) : (
+            <View style={[styles.cameraContainer, { justifyContent: 'center', backgroundColor: Colors.bone, padding: 20 }]}>
+              <Ionicons name="camera-outline" size={48} color={Colors.muted} style={{ alignSelf: 'center', marginBottom: 12 }} />
+              <AppText color={Colors.muted} style={{ textAlign: 'center' }}>
+                Live scanning is only available on the mobile app. Please upload a QR code from your gallery.
+              </AppText>
+            </View>
+          )}
         </View>
       </BottomSheet>
     </SafeAreaView>

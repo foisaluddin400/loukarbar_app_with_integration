@@ -10,3 +10,18 @@ export const getMyNotifications = async (page = 1, size = 20) => {
   const response = await api.get(`/notifications/?page=${page}&size=${size}&timezone=${encodeURIComponent(tz)}`);
   return response.data;
 };
+
+export const markNotificationSeen = async (id) => {
+  const response = await api.patch(`/notifications/${id}/seen`);
+  return response.data;
+};
+
+export const deleteNotification = async (id) => {
+  const response = await api.delete(`/notifications/${id}`);
+  return response.data;
+};
+
+export const clearAllNotifications = async () => {
+  const response = await api.delete(`/notifications/`);
+  return response.data;
+};

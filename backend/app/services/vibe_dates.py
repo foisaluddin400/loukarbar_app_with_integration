@@ -64,6 +64,18 @@ class VibeDateService:
         })
         
         result = await self.dates.insert_one(date_doc)
+        
+        # Trigger notification
+        notif = NotificationCreate(
+            recipient_id=payload.partner_id,
+            type=NotificationType.VIBE_DATE,
+            title="New Date Proposal",
+            message=f"{me['name']} proposed a date at {payload.where}.",
+            timezone=payload.timezone,
+            metadata={"date_id": str(result.inserted_id)}
+        )
+        await notification_service.schedule_notification(user_id, notif)
+        
         return await self._map_date(date_doc, payload.timezone)
 
     async def get_dates(self, user_id: str, user_timezone: str = "UTC", page: int = 1, size: int = 20) -> tuple[List[Dict[str, Any]], int]:
@@ -76,6 +88,14 @@ class VibeDateService:
         
         results = [await self._map_date(d, user_timezone) for d in docs]
         return results, total
+
+    async def get_pending_dates_count(self, user_id: str) -> int:
+        query = {
+            "$or": [{"proposer_id": user_id}, {"partner_id": user_id}],
+            "status": {"$in": [DateStatus.PENDING, DateStatus.PROPOSED_CHANGES]},
+            "last_updated_by": {"$ne": user_id}
+        }
+        return await self.dates.count_documents(query)
 
     async def get_date_by_id(self, date_id: str, user_id: str, user_timezone: str = "UTC") -> Dict[str, Any]:
         doc = await self.dates.find_one({"_id": ObjectId(date_id)})
@@ -99,8 +119,8 @@ class VibeDateService:
         old_status = date_doc["status"]
         new_status = old_status
 
-        # If already accepted, reset to pending and notify
-        if old_status == DateStatus.ACCEPTED:
+        # If already accepted or if we are countering a proposed change, reset to pending and notify
+        if old_status in [DateStatus.ACCEPTED, DateStatus.PROPOSED_CHANGES]:
             new_status = DateStatus.PENDING
             await notification_service.schedule_notification(user_id, NotificationCreate(
                 recipient_id=date_doc["partner_id"],

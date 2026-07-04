@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 import os
@@ -22,6 +22,7 @@ from app.services.play import play_service
 from app.services.vibe_dates import vibe_date_service
 from app.services.vibe_pulse import vibe_pulse_service
 from app.core.config import settings
+from app.core.websocket import ws_manager
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -101,3 +102,13 @@ app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 @app.get("/")
 def root():
     return {"message": "loukarver API is running"}
+
+@app.websocket("/ws/notifications/{user_id}")
+async def websocket_notifications(websocket: WebSocket, user_id: str):
+    await ws_manager.connect(user_id, websocket)
+    try:
+        while True:
+            # We don't expect the client to send much, but we must receive to keep the connection alive
+            data = await websocket.receive_text()
+    except WebSocketDisconnect:
+        ws_manager.disconnect(user_id)

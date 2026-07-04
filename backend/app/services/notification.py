@@ -25,9 +25,27 @@ class NotificationService:
         new_doc["sender_id"] = sender_id
         new_doc["status"] = NotificationStatus.SCHEDULED
         new_doc["created_at"] = datetime.now(timezone.utc)
+        if not new_doc.get("scheduled_for"):
+            new_doc["scheduled_for"] = new_doc["created_at"]
         
         result = await self.notifications_collection.insert_one(new_doc)
         new_doc["id"] = str(result.inserted_id)
+        
+        # Broadcast via WebSocket
+        from app.core.websocket import ws_manager
+        
+        # Prepare a small payload for websocket
+        ws_payload = {
+            "type": "NEW_NOTIFICATION",
+            "notification": {
+                "id": new_doc["id"],
+                "type": new_doc["type"],
+                "title": new_doc["title"],
+                "message": new_doc["message"]
+            }
+        }
+        await ws_manager.broadcast_to_user(payload.recipient_id, ws_payload)
+        
         return await self._map_notification(new_doc, payload.timezone)
 
     async def get_my_notifications(self, user_id: str, page: int = 1, size: int = 20, user_timezone: str = "UTC") -> Tuple[List[Dict[str, Any]], int]:
@@ -53,6 +71,18 @@ class NotificationService:
             {"$set": {"status": NotificationStatus.SEEN}}
         )
         return result.modified_count > 0
+
+    async def delete_notification(self, notification_id: str, user_id: str) -> bool:
+        result = await self.notifications_collection.delete_one(
+            {"_id": ObjectId(notification_id), "recipient_id": user_id}
+        )
+        return result.deleted_count > 0
+
+    async def clear_all_notifications(self, user_id: str) -> int:
+        result = await self.notifications_collection.delete_many(
+            {"recipient_id": user_id}
+        )
+        return result.deleted_count
 
     async def _map_notification(self, d: Dict[str, Any], user_timezone: str) -> Dict[str, Any]:
         d["id"] = str(d["_id"])

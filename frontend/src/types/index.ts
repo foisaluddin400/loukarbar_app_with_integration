@@ -157,8 +157,8 @@ export type AppMode = 'aligned' | 'becoming';
 export type AppScreen = 'mode' | 'welcome' | 'onboarding' | 'app';
 
 export type RootStackParamList = {
-  ModeSelector: undefined;
-  Login: undefined;
+  ModeSelector: { autoSelect?: 'vibe' | 'aligned' } | undefined;
+  Login: { returnTo?: 'vibe' | 'aligned' } | undefined;
   Signup: undefined;
   VerifyEmail: { email: string };
   ForgotPassword: undefined;

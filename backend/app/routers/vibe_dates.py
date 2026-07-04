@@ -40,6 +40,15 @@ async def list_vibe_dates(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/pending-count")
+async def get_pending_dates_count(current_user: dict = Depends(get_current_user)):
+    """Get the count of dates that require the user's attention."""
+    try:
+        count = await vibe_date_service.get_pending_dates_count(current_user["id"])
+        return {"success": True, "count": count}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/{date_id}", response_model=VibeDateResponse)
 async def get_vibe_date_details(date_id: str, current_user: dict = Depends(get_current_user)):
     """Get details of a specific date proposal."""

@@ -113,3 +113,6 @@ class VibeHistoryPaginatedResponse(BaseModel):
     page: int
     size: int
     category: str
+    search_term: Optional[str] = None
+    total_matched: int = 0
+    total_differed: int = 0

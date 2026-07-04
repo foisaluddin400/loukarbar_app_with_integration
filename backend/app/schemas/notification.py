@@ -20,12 +20,15 @@ class NotificationStatus(str, Enum):
     SEEN = "Seen"
     FAILED = "Failed"
 
+from typing import List, Optional, Dict, Any
+
 class NotificationBase(BaseModel):
     title: str
     message: str
     type: NotificationType
-    scheduled_for: datetime
+    scheduled_for: Optional[datetime] = None
     timezone: str = "UTC"
+    metadata: Optional[Dict[str, Any]] = None
 
 class NotificationCreate(NotificationBase):
     recipient_id: str # Can be self or partner

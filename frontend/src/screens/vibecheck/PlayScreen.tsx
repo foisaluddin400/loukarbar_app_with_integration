@@ -6,6 +6,7 @@ import {
   Pressable,
   ActivityIndicator,
   TouchableOpacity,
+  RefreshControl,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Colors } from "../../constants/colors";
@@ -25,7 +26,8 @@ import {
   submitVibeAnswers,
   getVibeResults,
   getConnections,
-  releaseConnection
+  releaseConnection,
+  getVibeStreak
 } from "../../services/vibeCheckApi";
 import api from "../../services/api";
 
@@ -55,6 +57,13 @@ export const PlayScreen: React.FC = () => {
   const navigation = useNavigation<BottomTabNavigationProp<VibeTabParamList>>();
   
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
+  
+  const onRefresh = React.useCallback(() => {
+    setRefreshing(true);
+    setRefreshKey(k => k + 1);
+  }, []);
   const [dailyCards, setDailyCards] = useState<any[]>([]);
   const [cardsAnsweredToday, setCardsAnsweredToday] = useState(0);
   const [streak, setStreak] = useState(0);
@@ -87,7 +96,7 @@ export const PlayScreen: React.FC = () => {
           getConnections().catch(() => ({ data: [] }))
         ]);
 
-        const allPartners = [...(profile?.active_users || []), ...(profile?.inactive_users || [])];
+        const allPartners = connsData?.data || [];
         if (profile) setMyUserId(profile.user_id);
         if (connsData?.data) setConnectionsList(connsData.data);
         
@@ -162,13 +171,22 @@ export const PlayScreen: React.FC = () => {
         console.log("Error loading PlayScreen data:", err);
       } finally {
         setLoading(false);
+        setRefreshing(false);
       }
     }
     loadData();
-  }, [partnerId]); // Re-run loadData when partner changes so we get their specific stats
+  }, [partnerId, refreshKey]); // Re-run loadData when partner changes or refreshed
 
-  const limitReached = currentCardIndex >= DAILY_LIMIT || currentCardIndex >= dailyCards.length;
-  const card = !limitReached && dailyCards.length > 0 ? dailyCards[currentCardIndex] : null;
+  const hasNoPartners = activePartners.length === 0;
+  const noCardsAvailable = !hasNoPartners && dailyCards.length === 0;
+  const limitReached = currentCardIndex >= DAILY_LIMIT;
+  const exhaustedDailyCards = !limitReached && dailyCards.length > 0 && currentCardIndex >= dailyCards.length;
+
+  const showNoPartnersState = hasNoPartners;
+  const showNoCardsState = noCardsAvailable || exhaustedDailyCards;
+  const showLimitReachedState = limitReached;
+  
+  const card = (!showNoPartnersState && !showNoCardsState && !showLimitReachedState && dailyCards.length > 0) ? dailyCards[currentCardIndex] : null;
 
   // WebSocket / Polling for partner's answer
   useEffect(() => {
@@ -238,8 +256,8 @@ export const PlayScreen: React.FC = () => {
             } catch(e) {}
           };
           
-          ws.onerror = (e) => {
-            console.error("WebSocket error:", e);
+          ws.onerror = (e: any) => {
+            console.log("WebSocket error:", e.message || "Unknown error");
             if (!interval && !cancelled) {
                 console.log("Falling back to polling...");
                 interval = setInterval(checkPartnerAnswer, 2000);
@@ -364,7 +382,12 @@ export const PlayScreen: React.FC = () => {
 
   return (
     <SafeAreaView style={styles.safe}>
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.accent} />
+        }
+      >
         <SamVibeNav 
           onPartnerChange={(newPartnerId) => {
             const p = activePartners.find(p => p.user_id === newPartnerId);
@@ -440,7 +463,7 @@ export const PlayScreen: React.FC = () => {
              );
           })()}
 
-          {limitReached ? (
+          {showNoPartnersState ? (
             <View style={styles.limitCard}>
               <AppText
                 size={32}
@@ -454,11 +477,39 @@ export const PlayScreen: React.FC = () => {
                 size={24}
                 style={{ lineHeight: 28, marginBottom: 6, textAlign: "center" }}
               >
-                That's your{" "}
-                <AppText variant="serifItalic" size={24} color={Colors.accent}>
-                  {numberToWord(DAILY_LIMIT)}
-                </AppText>{" "}
-                for today.
+                No active partners.
+              </AppText>
+              <AppText
+                variant="serifItalic"
+                size={14}
+                color={Colors.muted}
+                style={{ textAlign: "center", lineHeight: 22, marginBottom: 20 }}
+              >
+                Add a partner to start playing and building connections.
+              </AppText>
+              <AppButton
+                variant="outline"
+                size="md"
+                onPress={() => navigation.navigate("Connections")}
+              >
+                Find Connections
+              </AppButton>
+            </View>
+          ) : showNoCardsState ? (
+            <View style={styles.limitCard}>
+              <AppText
+                size={32}
+                color={Colors.accent}
+                style={{ marginBottom: 10 }}
+              >
+                ◓
+              </AppText>
+              <AppText
+                variant="display"
+                size={24}
+                style={{ lineHeight: 28, marginBottom: 6, textAlign: "center" }}
+              >
+                You're all caught up!
               </AppText>
               <AppText
                 variant="serifItalic"
@@ -466,9 +517,137 @@ export const PlayScreen: React.FC = () => {
                 color={Colors.muted}
                 style={{ textAlign: "center", lineHeight: 22 }}
               >
-                {getDailyMessage()}
+                You've answered all available cards. Check back later for more!
               </AppText>
             </View>
+          ) : showLimitReachedState ? (
+            <>
+              <View style={styles.limitCard}>
+                <AppText
+                  size={32}
+                  color={Colors.accent}
+                  style={{ marginBottom: 10 }}
+                >
+                  ◓
+                </AppText>
+                <AppText
+                  variant="display"
+                  size={24}
+                  style={{ lineHeight: 28, marginBottom: 6, textAlign: "center" }}
+                >
+                  That's your{" "}
+                  <AppText variant="serifItalic" size={24} color={Colors.accent}>
+                    {numberToWord(DAILY_LIMIT)}
+                  </AppText>{" "}
+                  for today.
+                </AppText>
+                <AppText
+                  variant="serifItalic"
+                  size={14}
+                  color={Colors.muted}
+                  style={{ textAlign: "center", lineHeight: 22 }}
+                >
+                  {getDailyMessage()}
+                </AppText>
+              </View>
+
+              {(() => {
+                  const res = allResults?.find((r: any) => r.partner_name === partnerName);
+                  if (res) {
+                      return (
+                          <View style={{ marginTop: 16, gap: 12 }}>
+                              <View style={styles.limitCard}>
+                                  <AppText variant="smallCaps" color={Colors.muted} style={{ marginBottom: 8 }}>
+                                    Today's Vibe
+                                  </AppText>
+                                  {res.both_finished ? (
+                                      <>
+                                          <AppText variant="display" size={32} color={Colors.ink} style={{ marginBottom: 4 }}>
+                                            {Math.round(res.daily_match_percent)}<AppText variant="display" size={20} color={Colors.muted}>%</AppText>
+                                          </AppText>
+                                          <AppText variant="serifItalic" size={14} color={Colors.muted}>
+                                            In sync with {partnerName}
+                                          </AppText>
+                                      </>
+                                  ) : (
+                                      <AppText variant="serifItalic" size={14} color={Colors.muted} style={{ textAlign: 'center', marginTop: 8 }}>
+                                        Waiting for {partnerName} to finish their cards today to see your match percentage.
+                                      </AppText>
+                                  )}
+                              </View>
+
+                              {/* Breakdown of today's cards */}
+                              {res.matched_answers?.map((ans: any, idx: number) => (
+                                  <View key={idx} style={[styles.limitCard, { padding: 16, gap: 12 }]}>
+                                      <AppText variant="smallCaps" color={Colors.muted} size={11}>
+                                        Card {idx + 1}
+                                      </AppText>
+                                      <AppText variant="heading" size={18} color={Colors.ink} style={{ textAlign: 'center' }}>
+                                        {ans.question}
+                                      </AppText>
+                                      
+                                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 }}>
+                                          <View style={{ flex: 1, alignItems: 'flex-start' }}>
+                                              <AppText variant="smallCaps" color={Colors.accent} size={10} style={{ marginBottom: 4 }}>
+                                                You
+                                              </AppText>
+                                              <AppText color={Colors.ink} size={14} style={{ fontWeight: '600', marginBottom: 2 }}>
+                                                {ans.my_answer}
+                                              </AppText>
+                                              {ans.my_answer_time && (
+                                                  <AppText variant="serifItalic" color={Colors.muted} size={11}>
+                                                    {new Date(ans.my_answer_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                  </AppText>
+                                              )}
+                                          </View>
+                                          
+                                          {/* MATCH/DIFFER PILL */}
+                                          {ans.partner_answer && (
+                                              <View style={{ 
+                                                  paddingHorizontal: 8, 
+                                                  paddingVertical: 4, 
+                                                  backgroundColor: ans.is_match ? Colors.sage : Colors.rule,
+                                                  borderRadius: 12,
+                                                  marginHorizontal: 8,
+                                                  alignSelf: 'center',
+                                                  justifyContent: 'center'
+                                              }}>
+                                                  <AppText variant="mono" size={9} color={ans.is_match ? Colors.bone : Colors.muted}>
+                                                      {ans.is_match ? "MATCH" : "DIFFER"}
+                                                  </AppText>
+                                              </View>
+                                          )}
+
+                                          <View style={{ flex: 1, alignItems: 'flex-end' }}>
+                                              <AppText variant="smallCaps" color={Colors.muted} size={10} style={{ marginBottom: 4 }}>
+                                                {partnerName}
+                                              </AppText>
+                                              {ans.partner_answer ? (
+                                                  <View style={{ alignItems: 'flex-end' }}>
+                                                      <AppText color={ans.is_match ? Colors.sage : Colors.ink} size={14} style={{ fontWeight: '600', marginBottom: 2, textAlign: 'right' }}>
+                                                        {ans.partner_answer}
+                                                      </AppText>
+                                                      {ans.partner_answer_time && (
+                                                          <AppText variant="serifItalic" color={Colors.muted} size={11}>
+                                                            {new Date(ans.partner_answer_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                          </AppText>
+                                                      )}
+                                                  </View>
+                                              ) : (
+                                                  <AppText variant="serifItalic" color={Colors.muted} size={13}>
+                                                    Waiting...
+                                                  </AppText>
+                                              )}
+                                          </View>
+                                      </View>
+                                  </View>
+                              ))}
+                          </View>
+                      );
+                  }
+                  return null;
+              })()}
+            </>
           ) : card ? (
             <>
               {/* Prompt */}

@@ -144,11 +144,18 @@ export const scanQrFromImage = async (imageUri) => {
 
 // ─── Vibe Cards ───────────────────────────────────────────────
 
-export const getVibeCardHistory = async (partner_id, category = "All", page = 1, size = 20) => {
-  const params = new URLSearchParams({ category, page, size });
-  if (partner_id) params.append("partner_id", partner_id);
-  const response = await api.get(`/vibecheck/cards/history?${params.toString()}`);
-  return response.data;
+export const getVibeCardHistory = async (partnerId, category = "All", searchTerm = "", page = 1, size = 20) => {
+    try {
+        let url = `/vibecheck/cards/history?category=${category}&page=${page}&size=${size}`;
+        if (partnerId) url += `&partner_id=${partnerId}`;
+        if (searchTerm) url += `&search_term=${encodeURIComponent(searchTerm)}`;
+        
+        const res = await api.get(url);
+        return res.data;
+    } catch (e) {
+        console.error("Error in getVibeCardHistory:", e);
+        return { success: false, data: [] };
+    }
 };
 
 export const getDailyCards = async (partner_id, timezone = "UTC") => {
@@ -182,5 +189,12 @@ export const getVibeStreak = async (timezone = "UTC") => {
 export const getSyncSummary = async (timezone = "UTC") => {
   const params = new URLSearchParams({ timezone, _t: Date.now().toString() });
   const response = await api.get(`/vibecheck/sync-summary?${params.toString()}`);
+  return response.data;
+};
+
+// ─── Vibe Dates ─────────────────────────────────────────────
+
+export const getPendingDatesCount = async () => {
+  const response = await api.get(`/vibedates/pending-count?_t=${Date.now()}`);
   return response.data;
 };

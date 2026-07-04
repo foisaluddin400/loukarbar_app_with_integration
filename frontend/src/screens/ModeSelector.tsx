@@ -1,34 +1,53 @@
 import { SafeAreaView } from 'react-native-safe-area-context';
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { View, ScrollView, StyleSheet, Pressable } from 'react-native';
-import { useNavigation } from "@react-navigation/native";
+import { useNavigation, useRoute, RouteProp } from "@react-navigation/native";
 import { StackNavigationProp } from "@react-navigation/stack";
 import { Colors } from "../constants/colors";
 import { AppText } from "../components/ui/AppText";
 import { RootStackParamList } from "@/types";
 import { getMe } from "../services/authApi";
 import { checkVibeStatus } from "../services/vibeCheckApi";
-import { useState } from "react";
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 type Nav = StackNavigationProp<RootStackParamList, "ModeSelector">;
+type ModeRoute = RouteProp<RootStackParamList, "ModeSelector">;
 
 export const ModeSelector: React.FC = () => {
   const nav = useNavigation<Nav>();
+  const route = useRoute<ModeRoute>();
   const [loadingAligned, setLoadingAligned] = useState(false);
   const [loadingVibe, setLoadingVibe] = useState(false);
+
+  useEffect(() => {
+    if (route.params?.autoSelect === 'vibe') {
+      handleVibePress();
+    } else if (route.params?.autoSelect === 'aligned') {
+      handleAlignedPress();
+    }
+  }, [route.params?.autoSelect]);
 
   const handleVibePress = async () => {
     try {
       setLoadingVibe(true);
+      const token = await AsyncStorage.getItem('access_token');
+      if (!token) {
+        nav.navigate('Login', { returnTo: 'vibe' });
+        return;
+      }
       const status = await checkVibeStatus();
       if (status.success) {
         nav.navigate("VibeApp");
       } else {
         nav.navigate("VibeOnboarding");
       }
-    } catch (error) {
+    } catch (error: any) {
       console.log("Error checking vibe status:", error);
-      nav.navigate("VibeOnboarding");
+      if (error?.response?.status === 401) {
+        nav.navigate('Login', { returnTo: 'vibe' });
+      } else {
+        nav.navigate("VibeOnboarding");
+      }
     } finally {
       setLoadingVibe(false);
     }
@@ -37,15 +56,24 @@ export const ModeSelector: React.FC = () => {
   const handleAlignedPress = async () => {
     try {
       setLoadingAligned(true);
+      const token = await AsyncStorage.getItem('access_token');
+      if (!token) {
+        nav.navigate('Login', { returnTo: 'aligned' });
+        return;
+      }
       const user = await getMe();
       if (user.is_aligned || user.partner || user.secret_key) {
         nav.navigate("AlignedApp");
       } else {
         nav.navigate("AlignedOnboarding");
       }
-    } catch (error) {
+    } catch (error: any) {
       console.log("Error checking user state:", error);
-      nav.navigate("AlignedOnboarding");
+      if (error?.response?.status === 401) {
+        nav.navigate('Login');
+      } else {
+        nav.navigate("AlignedOnboarding");
+      }
     } finally {
       setLoadingAligned(false);
     }

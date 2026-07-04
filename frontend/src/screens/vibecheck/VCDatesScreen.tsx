@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import {
   View,
   ScrollView,
@@ -6,6 +6,8 @@ import {
   Pressable,
   ActivityIndicator,
   Alert,
+  RefreshControl,
+  DeviceEventEmitter,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Colors } from "../../constants/colors";
@@ -15,7 +17,7 @@ import { AppTextInput } from "../../components/ui/AppTextInput";
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect } from "@react-navigation/native";
+import { useFocusEffect, useRoute, RouteProp } from "@react-navigation/native";
 
 import SamVibeNav from "@/components/ui/SamVibeNav";
 import { getVibeProfile } from "../../services/vibeCheckApi";
@@ -105,6 +107,40 @@ export const VCDatesScreen: React.FC = () => {
       fetchData();
     }, [fetchData])
   );
+
+  useEffect(() => {
+    const sub = DeviceEventEmitter.addListener("REFRESH_VIBE_DATA", fetchData);
+    return () => {
+      sub.remove();
+    };
+  }, [fetchData]);
+
+  const route = useRoute<RouteProp<any, 'VCDates'>>();
+  const deepLinkedDateId = (route.params as any)?.dateId;
+
+  useEffect(() => {
+    if (deepLinkedDateId && dates.length > 0 && !loading) {
+       const dateToOpen = dates.find(d => d.id === deepLinkedDateId);
+       if (dateToOpen) {
+          setEditingDate(dateToOpen);
+          setPlace(dateToOpen.where);
+          setMeetType(dateToOpen.meet_type || "location");
+          setNote(dateToOpen.proposer_note || "");
+          
+          const dt = new Date(dateToOpen.date);
+          setSelectedDate(dt);
+          setSelectedTime(dt);
+          setSheet(true);
+       }
+    }
+  }, [deepLinkedDateId, dates, loading]);
+
+  const [refreshing, setRefreshing] = useState(false);
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await fetchData();
+    setRefreshing(false);
+  }, [fetchData]);
 
   const handlePartnerChange = (newPartnerId: string) => {
     const p = activePartners.find((ap) => ap.user_id === newPartnerId);
@@ -231,7 +267,12 @@ export const VCDatesScreen: React.FC = () => {
   return (
     <SafeAreaView style={styles.safe}>
       <SamVibeNav onPartnerChange={handlePartnerChange} />
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.accent} />
+        }
+      >
         <View style={styles.inner}>
           <AppText
             variant="display"
@@ -265,6 +306,7 @@ export const VCDatesScreen: React.FC = () => {
           ) : upcoming.length > 0 ? (
             upcoming.map((dateItem) => {
               const isMine = dateItem.proposer_id === myUserId;
+              const isMyTurn = (isMine && dateItem.status === "proposed_changes") || (!isMine && dateItem.status === "pending");
               const isPending = dateItem.status === "pending" || dateItem.status === "proposed_changes";
               
               let statusLabel = "";
@@ -272,9 +314,12 @@ export const VCDatesScreen: React.FC = () => {
               if (dateItem.status === "accepted") {
                   statusLabel = "● Confirmed";
                   statusColor = Colors.accent;
-              } else if (isPending) {
+              } else if (dateItem.status === "pending") {
                   statusLabel = isMine ? "○ Proposed (Waiting for them)" : "● Proposed (Waiting for you)";
                   statusColor = isMine ? Colors.muted : Colors.sage;
+              } else if (dateItem.status === "proposed_changes") {
+                  statusLabel = isMine ? "● Changes Proposed (Waiting for you)" : "○ Changes Proposed (Waiting for them)";
+                  statusColor = isMine ? Colors.sage : Colors.muted;
               }
 
               return (
@@ -319,7 +364,7 @@ export const VCDatesScreen: React.FC = () => {
                   )}
 
                   <View style={{ flexDirection: "row", gap: 8, marginTop: 16 }}>
-                    {!isMine && isPending ? (
+                    {isMyTurn ? (
                       <>
                         <AppButton
                           variant="solid"
@@ -335,7 +380,7 @@ export const VCDatesScreen: React.FC = () => {
                           style={{ flex: 1 }}
                           onPress={() => openEditSheet(dateItem)}
                         >
-                          Change
+                          {isMine ? "Edit" : "Change"}
                         </AppButton>
                         <AppButton
                           variant="outline"
@@ -348,14 +393,16 @@ export const VCDatesScreen: React.FC = () => {
                       </>
                     ) : (
                       <>
-                        <AppButton
-                          variant="outline"
-                          size="sm"
-                          style={{ flex: 1 }}
-                          onPress={() => openEditSheet(dateItem)}
-                        >
-                          Edit
-                        </AppButton>
+                        {isMine && dateItem.status === "pending" && (
+                          <AppButton
+                            variant="outline"
+                            size="sm"
+                            style={{ flex: 1 }}
+                            onPress={() => openEditSheet(dateItem)}
+                          >
+                            Edit
+                          </AppButton>
+                        )}
                         <AppButton
                           variant="outline"
                           size="sm"

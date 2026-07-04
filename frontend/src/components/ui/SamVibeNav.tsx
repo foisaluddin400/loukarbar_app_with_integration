@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { View, StyleSheet, Pressable, Alert, ActivityIndicator, Image } from "react-native";
+import { View, StyleSheet, Pressable, Alert, ActivityIndicator, Image, Platform } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
+import { Swipeable } from 'react-native-gesture-handler';
 import { StackNavigationProp } from "@react-navigation/stack";
 import { RootStackParamList } from "../../types";
 import { Colors } from "../../constants/colors";
@@ -19,9 +21,19 @@ import {
   regenerateKey,
 } from "../../services/vibeCheckApi";
 import { deleteAccount } from "../../services/userApi";
+import { getMyNotifications, markNotificationSeen, deleteNotification, clearAllNotifications } from "../../services/notificationApi";
 import * as Clipboard from "expo-clipboard";
+import { DeviceEventEmitter } from "react-native";
 
-const API_BASE = 'http://localhost:8006';
+let CameraView: any = null;
+let useCameraPermissions: any = () => [null, async () => {}];
+if (Platform.OS !== "web") {
+  const ExpoCamera = require("expo-camera");
+  CameraView = ExpoCamera.CameraView;
+  useCameraPermissions = ExpoCamera.useCameraPermissions;
+}
+
+const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL;
 
 type Nav = StackNavigationProp<RootStackParamList>;
 
@@ -36,6 +48,9 @@ const SamVibeNav: React.FC<SamVibeNavProps> = ({ onPartnerChange }) => {
   const [switchSheet, setSwitchSheet] = useState(false);
   const [connectSheet, setConnectSheet] = useState(false);
   const [requestsSheet, setRequestsSheet] = useState(false);
+  const [notificationsSheet, setNotificationsSheet] = useState(false);
+  const [scannerSheet, setScannerSheet] = useState(false);
+  const [permission, requestPermission] = useCameraPermissions();
   const [isDeleteDataOpen, setIsDeleteDataOpen] = useState(false);
   const [deletePassword, setDeletePassword] = useState("");
 
@@ -43,6 +58,7 @@ const SamVibeNav: React.FC<SamVibeNavProps> = ({ onPartnerChange }) => {
   const [profile, setProfile] = useState<any>(null);
   const [connections, setConnections] = useState<any[]>([]);
   const [requests, setRequests] = useState<any[]>([]);
+  const [notifications, setNotifications] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Invite state
@@ -59,16 +75,18 @@ const SamVibeNav: React.FC<SamVibeNavProps> = ({ onPartnerChange }) => {
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
-      const [profileData, connectionsData, requestsData] = await Promise.all([
+      const [profileData, connectionsData, requestsData, notifsData] = await Promise.all([
         getVibeProfile().catch(() => null),
         getConnections().catch(() => ({ data: [] })),
         getRequests().catch(() => ({ data: [] })),
+        getMyNotifications(1, 50).catch(() => ({ data: [] })),
       ]);
       if (profileData) setProfile(profileData);
       
       const conns = connectionsData?.data || [];
       setConnections(conns);
       setRequests(requestsData?.data || []);
+      setNotifications(notifsData?.data || []);
       
       if (conns.length > 0 && onPartnerChange) {
          onPartnerChange(conns[0].user_id);
@@ -82,7 +100,34 @@ const SamVibeNav: React.FC<SamVibeNavProps> = ({ onPartnerChange }) => {
 
   useEffect(() => {
     fetchData();
+    DeviceEventEmitter.addListener("REFRESH_VIBE_DATA", fetchData);
+    return () => {
+      DeviceEventEmitter.removeAllListeners("REFRESH_VIBE_DATA");
+    };
   }, [fetchData]);
+
+  useEffect(() => {
+    if (!profile?.user_id) return;
+    
+    const wsUrl = process.env.EXPO_PUBLIC_BACKEND_URL
+      ? process.env.EXPO_PUBLIC_BACKEND_URL.replace("http", "ws") + `/ws/notifications/${profile.user_id}`
+      : `ws://localhost:8000/ws/notifications/${profile.user_id}`;
+      
+    const ws = new WebSocket(wsUrl);
+    
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === "NEW_NOTIFICATION") {
+           DeviceEventEmitter.emit("REFRESH_VIBE_DATA");
+        }
+      } catch (e) {}
+    };
+    
+    return () => {
+      ws.close();
+    };
+  }, [profile?.user_id]);
 
   const activeConnection = connections.length > 0 ? connections[activeIdx] || connections[0] : null;
   const activePartnerName = activeConnection?.name || "No connection";
@@ -130,10 +175,18 @@ const SamVibeNav: React.FC<SamVibeNavProps> = ({ onPartnerChange }) => {
       fetchData();
     } catch (error: any) {
       const msg = error.response?.data?.detail || error.message || "Failed to connect.";
-      Alert.alert("Error", msg);
+      Alert.alert("Error", error.message || "Failed to connect.");
     } finally {
       setConnectLoading(false);
     }
+  };
+
+  const handleBarcodeScanned = ({ type, data }: { type: string; data: string }) => {
+    setScannerSheet(false);
+    setKeyInput(data);
+    setTimeout(() => {
+        setConnectSheet(true);
+    }, 500);
   };
 
   const handleRespondToRequest = async (requestId: string, accept: boolean) => {
@@ -198,6 +251,45 @@ const SamVibeNav: React.FC<SamVibeNavProps> = ({ onPartnerChange }) => {
     }
   };
 
+  const handleDeleteNotification = async (id: string) => {
+    try {
+      await deleteNotification(id);
+      fetchData();
+    } catch (e) {
+      console.error("Failed to delete notification", e);
+    }
+  };
+
+  const handleClearAllNotifications = async () => {
+    try {
+      await clearAllNotifications();
+      fetchData();
+    } catch (e) {
+      console.error("Failed to clear notifications", e);
+    }
+  };
+
+  const getConnectionText = () => {
+    if (!activeConnection) return "LOADING...";
+    const connectedAt = new Date(activeConnection.connected_at);
+    
+    // Start of current day vs start of connected day to count days accurately
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const connectedDate = new Date(connectedAt);
+    connectedDate.setHours(0, 0, 0, 0);
+    
+    const diffTime = Math.abs(today.getTime() - connectedDate.getTime());
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1; // Day 1 is the day of connection
+    
+    if (diffDays > 90) {
+      return `CONNECTED ${diffDays} DAYS`;
+    } else {
+      const remaining = 90 - diffDays;
+      return `DAY ${diffDays} • ${remaining} REMAINING`;
+    }
+  };
+
   return (
     <View>
       {/* Top Bar */}
@@ -205,53 +297,90 @@ const SamVibeNav: React.FC<SamVibeNavProps> = ({ onPartnerChange }) => {
         <AppText variant="display" style={{ fontSize: 25 }}>
           vibe check.
         </AppText>
-        <Pressable onPress={() => navigation.navigate('VibeProfile')} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          {profile?.name && (
-            <AppText variant="serifItalic" size={16} color={Colors.ink}>
-              {profile.name}
-            </AppText>
-          )}
-          {profilePictureUrl ? (
-            <Image source={{ uri: profilePictureUrl }} style={styles.navAvatar} />
-          ) : (
-            <View style={styles.navAvatarPlaceholder}>
-              <AppText style={{ color: '#fff', fontSize: 14, fontWeight: '600' }}>
-                {myInitial}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+          <Pressable onPress={() => setNotificationsSheet(true)} style={{ position: 'relative', marginTop: 4 }}>
+            <Ionicons name="notifications-outline" size={24} color={Colors.ink} />
+            {(requests.length + notifications.filter(n => n.status !== "seen").length) > 0 && (
+              <View style={{
+                position: 'absolute',
+                top: -2,
+                right: -2,
+                backgroundColor: Colors.accent,
+                minWidth: 14,
+                height: 14,
+                borderRadius: 7,
+                justifyContent: 'center',
+                alignItems: 'center',
+                borderWidth: 1.5,
+                borderColor: Colors.bone,
+                paddingHorizontal: 2
+              }}>
+                <AppText style={{ color: Colors.white, fontSize: 8, fontWeight: 'bold', lineHeight: 10 }}>
+                  {requests.length + notifications.filter(n => n.status !== "seen").length}
+                </AppText>
+              </View>
+            )}
+          </Pressable>
+          <Pressable onPress={() => navigation.navigate('VibeProfile')} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            {profile?.name && (
+              <AppText variant="serifItalic" size={16} color={Colors.ink}>
+                {profile.name}
               </AppText>
-            </View>
-          )}
-        </Pressable>
+            )}
+            {profilePictureUrl ? (
+              <Image source={{ uri: profilePictureUrl }} style={styles.navAvatar} />
+            ) : (
+              <View style={styles.navAvatarPlaceholder}>
+                <AppText style={{ color: '#fff', fontSize: 14, fontWeight: '600' }}>
+                  {myInitial}
+                </AppText>
+              </View>
+            )}
+          </Pressable>
+        </View>
       </View>
 
       {/* Active Connection Card */}
       <Pressable style={styles.samCard} onPress={() => setSwitchSheet(true)}>
         <View style={styles.samLeft}>
-          <View style={styles.avatar}>
-            <AppText style={{ color: "#fff", fontSize: 18, fontWeight: "600" }}>
-              {activePartnerInitial}
-            </AppText>
+          <View style={{ position: 'relative' }}>
+            {activeConnection?.profile_picture ? (
+              <Image 
+                source={{ uri: activeConnection.profile_picture.startsWith('http') ? activeConnection.profile_picture : `${API_BASE}/${activeConnection.profile_picture.replace(/\\/g, '/')}` }} 
+                style={styles.avatar} 
+              />
+            ) : (
+              <View style={styles.avatar}>
+                <AppText style={{ color: "#fff", fontSize: 18, fontWeight: "600" }}>
+                  {activePartnerInitial}
+                </AppText>
+              </View>
+            )}
+            {activeConnection?.is_online && (
+              <View style={{ position: 'absolute', bottom: -2, right: -2, width: 12, height: 12, borderRadius: 6, backgroundColor: '#4CAF50', borderWidth: 2, borderColor: '#ece5dd' }} />
+            )}
           </View>
           <View>
-            <AppText variant="heading" size={13}>
+            <AppText variant="heading" size={14}>
               {activePartnerName}
             </AppText>
             <AppText
               variant="mono"
-              color={Colors.accent}
-              style={{ fontSize: 8 }}
+              color={Colors.muted}
+              style={{ fontSize: 9, marginTop: 2 }}
             >
-              {profile ? `${profile.active} ACTIVE • ${profile.connect} CONNECTIONS` : "LOADING..."}
+              {getConnectionText()}
             </AppText>
           </View>
         </View>
 
         <View style={styles.samRight}>
-          <View style={styles.activeBadge}>
+          <View style={[styles.activeBadge, { backgroundColor: activeConnection?.is_online ? '#e8f5e9' : '#f5f5f5' }]}>
             <AppText
               variant="mono"
-              style={{ fontSize: 10, color: Colors.muted }}
+              style={{ fontSize: 10, color: activeConnection?.is_online ? '#2e7d32' : Colors.muted }}
             >
-              {profile ? `${profile.active} ACTIVE` : "..."}
+              {activeConnection?.is_online ? "ONLINE" : "OFFLINE"}
             </AppText>
           </View>
         </View>
@@ -318,10 +447,10 @@ const SamVibeNav: React.FC<SamVibeNavProps> = ({ onPartnerChange }) => {
 
             {requests.length > 0 && (
               <Pressable
-                style={styles.menuItem}
+                style={[styles.menuItem, { backgroundColor: Colors.accent }]}
                 onPress={() => {
                   setSettingsSheet(false);
-                  setRequestsSheet(true);
+                  setNotificationsSheet(true);
                 }}
               >
                 <AppText variant="heading" size={17}>
@@ -342,7 +471,10 @@ const SamVibeNav: React.FC<SamVibeNavProps> = ({ onPartnerChange }) => {
               </AppText>
             </Pressable>
 
-            <Pressable style={styles.menuItem}>
+            <Pressable style={styles.menuItem} onPress={() => {
+                setSettingsSheet(false);
+                setNotificationsSheet(true);
+            }}>
               <AppText variant="heading" size={17}>
                 Notifications
               </AppText>
@@ -514,6 +646,18 @@ const SamVibeNav: React.FC<SamVibeNavProps> = ({ onPartnerChange }) => {
           />
 
           <AppButton
+            variant="outline"
+            size="md"
+            style={{ marginTop: 12 }}
+            onPress={() => {
+               setConnectSheet(false);
+               setTimeout(() => setScannerSheet(true), 300);
+            }}
+          >
+            SCAN QR CODE
+          </AppButton>
+
+          <AppButton
             full
             variant="solid"
             size="lg"
@@ -579,6 +723,144 @@ const SamVibeNav: React.FC<SamVibeNavProps> = ({ onPartnerChange }) => {
           )}
         </View>
       </BottomSheet>
+      {/* ==================== NOTIFICATIONS SHEET ==================== */}
+      <BottomSheet
+        open={notificationsSheet}
+        onClose={() => {
+          setNotificationsSheet(false);
+          fetchData(); // Refresh on close in case they read things
+        }}
+        kicker="UPDATES"
+        title="Notifications"
+      >
+        <View style={{ gap: 16 }}>
+          {notifications.length > 0 && (
+            <View style={{ flexDirection: 'row', justifyContent: 'flex-end' }}>
+              <Pressable onPress={handleClearAllNotifications}>
+                <AppText color={Colors.accent} size={14}>Clear All</AppText>
+              </Pressable>
+            </View>
+          )}
+          {requests.length === 0 && notifications.length === 0 ? (
+            <AppText color={Colors.muted} style={{ textAlign: 'center', marginTop: 20 }}>
+              No notifications.
+            </AppText>
+          ) : (
+            <>
+              {requests.map((req) => (
+                <View key={req.id} style={{ backgroundColor: '#fff', padding: 16, borderRadius: 12, borderWidth: 1, borderColor: Colors.rule }}>
+                  <AppText color={Colors.text} style={{ marginBottom: 12 }}>
+                    <AppText color={Colors.text} style={{ fontWeight: "bold" }}>{req.sender_name}</AppText> wants to connect with you.
+                  </AppText>
+                  <View style={{ flexDirection: "row", gap: 8 }}>
+                    <AppButton variant="solid" size="sm" style={{ flex: 1 }} onPress={() => handleRespondToRequest(req.id, true)}>
+                      Accept
+                    </AppButton>
+                    <AppButton variant="outline" size="sm" style={{ flex: 1 }} onPress={() => handleRespondToRequest(req.id, false)}>
+                      Decline
+                    </AppButton>
+                  </View>
+                </View>
+              ))}
+              
+              {notifications.map((notif) => {
+                const renderRightActions = () => (
+                  <Pressable 
+                    style={{ backgroundColor: '#ff4444', justifyContent: 'center', alignItems: 'center', width: 70, borderRadius: 12, marginLeft: 8 }}
+                    onPress={() => handleDeleteNotification(notif.id)}
+                  >
+                    <Ionicons name="trash" size={24} color="#fff" />
+                  </Pressable>
+                );
+                const renderLeftActions = () => (
+                  <View style={{ backgroundColor: '#44aa44', justifyContent: 'center', alignItems: 'center', width: 70, borderRadius: 12, marginRight: 8 }}>
+                    <Ionicons name="checkmark" size={24} color="#fff" />
+                  </View>
+                );
+                
+                return (
+                  <Swipeable 
+                    key={notif.id}
+                    renderRightActions={renderRightActions}
+                    renderLeftActions={notif.status !== 'seen' ? renderLeftActions : undefined}
+                    onSwipeableLeftOpen={async () => {
+                       if (notif.status !== "seen") {
+                          await markNotificationSeen(notif.id);
+                          fetchData();
+                       }
+                    }}
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 12, opacity: notif.status === "seen" ? 0.6 : 1, borderWidth: 1, borderColor: Colors.rule }}>
+                      <Pressable 
+                        style={{ flex: 1, padding: 16 }}
+                        onPress={async () => {
+                           if (notif.status !== "seen") {
+                              await markNotificationSeen(notif.id);
+                              fetchData();
+                           }
+                           setNotificationsSheet(false);
+                           if (notif.type === "VIBE_DATE" || notif.type === "DATE_PROPOSED") {
+                               navigation.navigate("VCDates", { dateId: notif.metadata?.date_id });
+                           }
+                        }}
+                      >
+                        <AppText color={Colors.text} style={{ fontWeight: "bold", marginBottom: 4 }}>
+                          {notif.title}
+                        </AppText>
+                        <AppText color={Colors.muted}>
+                          {notif.message}
+                        </AppText>
+                      </Pressable>
+                    </View>
+                  </Swipeable>
+                );
+              })}
+            </>
+          )}
+        </View>
+      </BottomSheet>
+
+      {/* ==================== SCANNER SHEET ==================== */}
+      <BottomSheet
+        open={scannerSheet}
+        onClose={() => setScannerSheet(false)}
+        kicker="SCAN"
+        title="Scan QR Code"
+        dark
+      >
+        <View style={{ alignItems: 'center' }}>
+          {Platform.OS !== 'web' ? (
+            permission?.granted ? (
+              <View style={styles.cameraContainer}>
+                <CameraView
+                  style={styles.camera}
+                  onBarcodeScanned={handleBarcodeScanned}
+                  barcodeScannerSettings={{
+                    barcodeTypes: ['qr'],
+                  }}
+                />
+                <View style={styles.scannerOverlay}>
+                  <View style={styles.scannerFrame} />
+                </View>
+              </View>
+            ) : (
+              <View style={[styles.cameraContainer, { justifyContent: 'center', backgroundColor: '#333' }]}>
+                <AppText color="#fff">Camera permission is required.</AppText>
+                <AppButton variant="solid" size="sm" onPress={requestPermission} style={{ marginTop: 16 }}>
+                  Grant Permission
+                </AppButton>
+              </View>
+            )
+          ) : (
+            <View style={[styles.cameraContainer, { justifyContent: 'center', backgroundColor: Colors.bone, padding: 20 }]}>
+              <Ionicons name="camera-outline" size={48} color={Colors.muted} style={{ alignSelf: 'center', marginBottom: 12 }} />
+              <AppText color={Colors.muted} style={{ textAlign: 'center' }}>
+                Live scanning is only available on the mobile app. Please upload a QR code from your gallery.
+              </AppText>
+            </View>
+          )}
+        </View>
+      </BottomSheet>
 
       {/* ==================== SWITCH OR ADD BOTTOMSHEET ==================== */}
       <BottomSheet
@@ -620,18 +902,35 @@ const SamVibeNav: React.FC<SamVibeNavProps> = ({ onPartnerChange }) => {
                 }}
                 onLongPress={() => handleDeleteConnection(conn.user_id, conn.name)}
               >
-                <View style={[styles.avatarBig, i === activeIdx ? { backgroundColor: "#C44D4D" } : { backgroundColor: "#e8b4b4af" }]}>
-                  <AppText style={{ color: "#fff", fontSize: 24 }}>
-                    {conn.name?.charAt(0).toUpperCase() || "?"}
-                  </AppText>
+                <View style={{ position: 'relative' }}>
+                  {conn.profile_picture ? (
+                    <Image 
+                      source={{ uri: conn.profile_picture.startsWith('http') ? conn.profile_picture : `${API_BASE}/${conn.profile_picture.replace(/\\/g, '/')}` }} 
+                      style={[styles.avatarBig, i === activeIdx ? { borderWidth: 2, borderColor: Colors.white } : {}]} 
+                    />
+                  ) : (
+                    <View style={[styles.avatarBig, i === activeIdx ? { backgroundColor: "#C44D4D" } : { backgroundColor: "#e8b4b4af" }]}>
+                      <AppText style={{ color: "#fff", fontSize: 24 }}>
+                        {conn.name?.charAt(0).toUpperCase() || "?"}
+                      </AppText>
+                    </View>
+                  )}
+                  {conn.is_online && (
+                    <View style={{ position: 'absolute', bottom: 0, right: 0, width: 14, height: 14, borderRadius: 7, backgroundColor: '#4CAF50', borderWidth: 2, borderColor: i === activeIdx ? Colors.accent : Colors.background }} />
+                  )}
                 </View>
-                <View style={{ flex: 1 }}>
+                <View style={{ flex: 1, paddingLeft: 12 }}>
                   <AppText variant="heading" size={18} color={i === activeIdx ? Colors.white : Colors.ink}>
                     {conn.name}
                   </AppText>
-                  <AppText variant="mono" color={Colors.muted}>
+                  <AppText variant="mono" color={Colors.muted} style={{ fontSize: 10 }}>
                     CONNECTED {new Date(conn.connected_at).toLocaleDateString().toUpperCase()}
                   </AppText>
+                  {conn.pending_questions > 0 && (
+                    <AppText variant="mono" color={i === activeIdx ? Colors.white : Colors.accent} style={{ fontSize: 10, marginTop: 4 }}>
+                      • {conn.pending_questions} PENDING TODAY
+                    </AppText>
+                  )}
                 </View>
                 {i === activeIdx && (
                   <View style={styles.activeTag}>
@@ -857,5 +1156,31 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.accent,
     alignItems: "center",
     justifyContent: "center",
+  },
+
+  // Scanner styles
+  cameraContainer: {
+    width: 250,
+    height: 250,
+    borderRadius: 24,
+    overflow: 'hidden',
+    backgroundColor: '#000',
+    marginTop: 20,
+    position: 'relative',
+  },
+  camera: {
+    flex: 1,
+  },
+  scannerOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  scannerFrame: {
+    width: 180,
+    height: 180,
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.3)',
+    borderRadius: 16,
   },
 });

@@ -61,8 +61,8 @@ class VibeCheckService:
             # 1. Count connections (connect)
             connect_count = await self.connections.count_documents({"user_id": user_id})
             
-            # 2. Categorize partners (active vs inactive) - Threshold: 15 minutes
-            active_threshold = now - timedelta(minutes=15)
+            # 2. Categorize partners (active vs inactive) - Threshold: 5 minutes
+            active_threshold = now - timedelta(minutes=5)
             
             # Fetch all partner IDs for this user
             cursor = self.connections.find({"user_id": user_id}, {"partner_id": 1})
@@ -171,14 +171,43 @@ class VibeCheckService:
         
         partner_ids = [c["partner_id"] for c in connection_docs]
         partner_profiles = await self.profiles.find({"user_id": {"$in": partner_ids}}).to_list(length=None)
-        profile_map = {p["user_id"]: p["name"] for p in partner_profiles}
+        profile_map = {p["user_id"]: p for p in partner_profiles}
+        
+        user_answers_col = self.db["vibe_user_answers"]
+        now = datetime.now(timezone.utc)
+        active_threshold = now - timedelta(minutes=5)
         
         results = []
         for c in connection_docs:
+            p_id = c["partner_id"]
+            p_profile = profile_map.get(p_id, {})
+            
+            # Online status check
+            is_online = False
+            p_updated = p_profile.get("updated_at")
+            if p_updated:
+                if p_updated.tzinfo is None:
+                    p_updated = p_updated.replace(tzinfo=timezone.utc)
+                if p_updated >= active_threshold:
+                    is_online = True
+                    
+            # Pending questions check
+            current_day = c.get("current_journey_day", 1)
+            p_ans_doc = await user_answers_col.find_one({
+                "user_id": p_id,
+                "partner_id": user_id,
+                "journey_day": current_day
+            })
+            answers_count = len(p_ans_doc.get("answers", [])) if p_ans_doc else 0
+            pending_questions = max(0, 3 - answers_count)
+            
             results.append({
-                "user_id": c["partner_id"],
-                "name": profile_map.get(c["partner_id"], "Unknown User"),
-                "connected_at": c["connected_at"]
+                "user_id": p_id,
+                "name": p_profile.get("name", "Unknown User"),
+                "connected_at": c["connected_at"],
+                "profile_picture": p_profile.get("profile_picture"),
+                "is_online": is_online,
+                "pending_questions": pending_questions
             })
         return results
 
@@ -204,45 +233,31 @@ class VibeCheckService:
 
         now = datetime.now(timezone.utc)
         
-        # 4. Create mutual connections instantly
-        # Me -> Target
-        await self.connections.update_one(
-            {"user_id": user_id, "partner_id": target["user_id"]},
-            {"$setOnInsert": {
-                "user_id": user_id, 
-                "partner_id": target["user_id"], 
-                "connected_at": now,
-                "current_journey_day": 1,
-                "status": "active",
-                "stalled_since": None,
-                "silent_partner_id": None
-            }},
-            upsert=True
-        )
-        # Target -> Me
-        await self.connections.update_one(
-            {"user_id": target["user_id"], "partner_id": user_id},
-            {"$setOnInsert": {
-                "user_id": target["user_id"], 
-                "partner_id": user_id, 
-                "connected_at": now,
-                "current_journey_day": 1,
-                "status": "active",
-                "stalled_since": None,
-                "silent_partner_id": None
-            }},
-            upsert=True
-        )
+        # 4. Check if a request already exists
+        existing_request = await self.requests.find_one({
+            "sender_id": user_id, 
+            "recipient_id": target["user_id"]
+        })
+        if existing_request:
+            raise ValueError(f"You have already sent a request to {target['name']}.")
 
-        # Optionally, remove any pending requests between these two since they are now connected
-        await self.requests.delete_many({
-            "$or": [
-                {"sender_id": user_id, "recipient_id": target["user_id"]},
-                {"sender_id": target["user_id"], "recipient_id": user_id}
-            ]
+        # 5. Check if they already sent us a request
+        reverse_request = await self.requests.find_one({
+            "sender_id": target["user_id"], 
+            "recipient_id": user_id
+        })
+        if reverse_request:
+            raise ValueError(f"{target['name']} has already sent you a request. Please approve it from your requests panel.")
+
+        # 6. Create the connection request
+        await self.requests.insert_one({
+            "sender_id": user_id,
+            "sender_name": initiator["name"],
+            "recipient_id": target["user_id"],
+            "created_at": now
         })
 
-        return {"success": True, "message": f"Successfully connected with {target['name']}!"}
+        return {"success": True, "message": f"Connection request sent to {target['name']}!"}
 
     async def get_pending_requests(self, user_id: str) -> List[Dict[str, Any]]:
         """List all pending connection requests for this user."""
