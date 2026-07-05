@@ -26,7 +26,26 @@ export const deleteVibeDate = async (dateId) => {
   return response.data;
 };
 
+export const cancelVibeDate = async (dateId) => {
+  const response = await api.post(`/vibedates/${dateId}/cancel`);
+  return response.data;
+};
+
 export const respondToVibeDate = async (dateId, payload) => {
   const response = await api.post(`/vibedates/${dateId}/respond`, payload);
+  return response.data;
+};
+
+export const markDatesSeen = async () => {
+  const response = await api.post(`/vibedates/mark-seen`);
+  return response.data;
+};
+
+export const completeVibeDate = async (dateId) => {
+  const response = await api.post(`/vibedates/${dateId}/complete`);
+  return response.data;
+};
+export const hideVibeDate = async (dateId) => {
+  const response = await api.post(`/vibedates/${dateId}/hide`);
   return response.data;
 };

@@ -17,6 +17,7 @@ class VibeAnswer(BaseModel):
 class VibeCardDaily(BaseModel):
     date: str # mm.dd.yyyy
     questions: List[VibeQuestion]
+    current_journey_day: int = 1
 
 class VibeAnswerSubmit(BaseModel):
     partner_id: str
@@ -90,21 +91,35 @@ class CategoryMatch(BaseModel):
     total_questions: int
     matched_questions: int
 
+class TimelineEntry(BaseModel):
+    day: int
+    match_percentage: float
+    matches: int
+    total: int
+
+class DepthMatch(BaseModel):
+    depth: str
+    match_percentage: float
+    matches: int
+    total: int
+
 class PulseAnalytics(BaseModel):
     partner_id: str
     partner_name: str
-    cumulative_match_percent: float
-    total_questions_answered: int
-    matched_questions_count: int
     overall_match_percentage: float
-    strongest_categories: List[CategoryMatch]
-    weakest_categories: List[CategoryMatch]
-    recent_matches: List[VibeHistoryEntry]
-    recent_differences: List[VibeHistoryEntry]
+    total_cards_played: int
+    total_matches: int
+    timeline: List[TimelineEntry]
+    by_depth: List[DepthMatch]
+    by_category: List[CategoryMatch]
+    key_agreements: List[VibeHistoryEntry]
+    key_disagreements: List[VibeHistoryEntry]
+    strongest_category: Optional[CategoryMatch] = None
+    divergent_category: Optional[CategoryMatch] = None
 
 class PulseAnalyticsResponse(BaseModel):
     success: bool
-    data: List[PulseAnalytics]
+    data: PulseAnalytics
 
 class VibeHistoryPaginatedResponse(BaseModel):
     success: bool

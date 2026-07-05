@@ -207,7 +207,8 @@ class VibeCheckService:
                 "connected_at": c["connected_at"],
                 "profile_picture": p_profile.get("profile_picture"),
                 "is_online": is_online,
-                "pending_questions": pending_questions
+                "pending_questions": pending_questions,
+                "current_journey_day": current_day
             })
         return results
 

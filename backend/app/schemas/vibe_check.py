@@ -34,6 +34,7 @@ class VibeCheckConnection(BaseModel):
     profile_picture: Optional[str] = None
     is_online: bool = False
     pending_questions: int = 0
+    current_journey_day: int = 1
 
 class VibeCheckRequest(BaseModel):
     request_id: str

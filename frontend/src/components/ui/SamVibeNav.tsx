@@ -20,6 +20,7 @@ import {
   deleteConnection,
   regenerateKey,
 } from "../../services/vibeCheckApi";
+import { listVibeDates } from "../../services/vibeDatesApi";
 import { deleteAccount } from "../../services/userApi";
 import { getMyNotifications, markNotificationSeen, deleteNotification, clearAllNotifications } from "../../services/notificationApi";
 import * as Clipboard from "expo-clipboard";
@@ -36,6 +37,43 @@ if (Platform.OS !== "web") {
 const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL;
 
 type Nav = StackNavigationProp<RootStackParamList>;
+
+export const LiveCountdownNav = ({ targetDate }: { targetDate: Date }) => {
+  const [timeLeft, setTimeLeft] = useState("");
+
+  useEffect(() => {
+    const updateTimer = () => {
+      const now = new Date();
+      const diff = targetDate.getTime() - now.getTime();
+      
+      if (diff <= 0) {
+        setTimeLeft("HAPPENING NOW!");
+        return;
+      }
+      
+      const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+      const hours = Math.floor((diff / (1000 * 60 * 60)) % 24);
+      const minutes = Math.floor((diff / 1000 / 60) % 60);
+      const seconds = Math.floor((diff / 1000) % 60);
+
+      if (days > 0) {
+        setTimeLeft(`DATE IN ${days}D ${hours}H`);
+      } else {
+        setTimeLeft(`DATE IN ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`);
+      }
+    };
+    
+    updateTimer();
+    const interval = setInterval(updateTimer, 1000);
+    return () => clearInterval(interval);
+  }, [targetDate]);
+
+  return (
+    <AppText variant="mono" size={10} color={Colors.accent} style={{ marginRight: 8, marginTop: 1 }}>
+      {timeLeft}
+    </AppText>
+  );
+};
 
 interface SamVibeNavProps {
   onPartnerChange?: (partnerId: string) => void;
@@ -59,6 +97,7 @@ const SamVibeNav: React.FC<SamVibeNavProps> = ({ onPartnerChange }) => {
   const [connections, setConnections] = useState<any[]>([]);
   const [requests, setRequests] = useState<any[]>([]);
   const [notifications, setNotifications] = useState<any[]>([]);
+  const [upcomingDate, setUpcomingDate] = useState<Date | null>(null);
   const [loading, setLoading] = useState(true);
 
   // Invite state
@@ -87,6 +126,18 @@ const SamVibeNav: React.FC<SamVibeNavProps> = ({ onPartnerChange }) => {
       setConnections(conns);
       setRequests(requestsData?.data || []);
       setNotifications(notifsData?.data || []);
+      
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const datesRes = await listVibeDates(1, 100, tz).catch(() => null);
+      if (datesRes?.data) {
+          const upcoming = datesRes.data.filter((d: any) => d.status === "accepted" && new Date(`${d.date}T${d.time}`) >= new Date());
+          if (upcoming.length > 0) {
+              upcoming.sort((a: any, b: any) => new Date(`${a.date}T${a.time}`).getTime() - new Date(`${b.date}T${b.time}`).getTime());
+              setUpcomingDate(new Date(`${upcoming[0].date}T${upcoming[0].time}`));
+          } else {
+              setUpcomingDate(null);
+          }
+      }
       
       if (conns.length > 0 && onPartnerChange) {
          onPartnerChange(conns[0].user_id);
@@ -125,7 +176,7 @@ const SamVibeNav: React.FC<SamVibeNavProps> = ({ onPartnerChange }) => {
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          if (data.type === "NEW_NOTIFICATION") {
+          if (data.type === "NEW_NOTIFICATION" || data.type === "FLAG_CREATED" || data.type === "PULSE_UPDATED") {
              DeviceEventEmitter.emit("REFRESH_VIBE_DATA");
           }
         } catch (e) {}

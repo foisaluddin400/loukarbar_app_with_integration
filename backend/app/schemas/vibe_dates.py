@@ -8,6 +8,8 @@ class DateStatus(str, Enum):
     ACCEPTED = "accepted"
     REJECTED = "rejected"
     PROPOSED_CHANGES = "proposed_changes"
+    CANCELLED = "cancelled"
+    COMPLETED = "completed"
 
 class VibeDateCreate(BaseModel):
     partner_id: str
@@ -42,6 +44,8 @@ class VibeDateResponse(BaseModel):
     last_updated_by: str
     created_at: datetime
     updated_at: datetime
+    completion_requested_by: List[str] = Field(default_factory=list)
+    hidden_by: List[str] = Field(default_factory=list)
 
 class VibeDateRespondRequest(BaseModel):
     action: DateStatus # accepted, rejected, proposed_changes

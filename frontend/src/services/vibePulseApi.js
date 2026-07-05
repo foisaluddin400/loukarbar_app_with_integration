@@ -25,6 +25,11 @@ export const checkAlignedConnection = async (partner_id) => {
   return res.data;
 };
 
+export const breakAlignment = async (password) => {
+  const res = await api.post('/users/break-alignment', { password });
+  return res.data;
+};
+
 export const getPulseAnalytics = async (partner_id) => {
   const params = partner_id ? { partner_id } : {};
   const res = await api.get('/ladder/insights/analytics', { params });

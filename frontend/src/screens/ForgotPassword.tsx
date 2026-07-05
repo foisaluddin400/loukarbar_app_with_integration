@@ -64,6 +64,8 @@ const ForgotPassword = () => {
             placeholder="lou@example.com"
             keyboardType="email-address"
             autoCapitalize="none"
+            autoComplete="email"
+            textContentType="emailAddress"
           />
         </View>
 

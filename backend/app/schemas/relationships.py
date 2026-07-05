@@ -117,3 +117,6 @@ class AlignResponse(BaseModel):
     success: bool
     message: str
     data: RelationshipResponseData
+
+class BreakAlignmentRequest(BaseModel):
+    password: str = Field(..., description="User's login password to confirm breaking alignment")

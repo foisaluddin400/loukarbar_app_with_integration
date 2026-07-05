@@ -17,7 +17,8 @@ import { ThisOrThatCard } from "../../components/vibecheck/ThisOrThatCard";
 import {
   VibeTabParamList,
 } from "../../types";
-import SamVibeNav from "@/components/ui/SamVibeNav";
+import SamVibeNav, { LiveCountdownNav } from "@/components/ui/SamVibeNav";
+import { listVibeDates } from "../../services/vibeDatesApi";
 import { useNavigation } from "@react-navigation/native";
 import { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
 import {
@@ -76,6 +77,7 @@ export const PlayScreen: React.FC = () => {
   const [partnerId, setPartnerId] = useState<string | null>(null);
   const [myUserId, setMyUserId] = useState<string | null>(null);
   const [partnerSheet, setPartnerSheet] = useState(false);
+  const [upcomingDate, setUpcomingDate] = useState<Date | null>(null);
 
   const [myPick, setMyPick] = useState<"a" | "b" | null>(null);
   const [theirPick, setTheirPick] = useState<"a" | "b" | null>(null);
@@ -90,11 +92,20 @@ export const PlayScreen: React.FC = () => {
   useEffect(() => {
     async function loadData() {
       try {
-        const [profile, streakData, connsData] = await Promise.all([
+        const [profile, streakData, connsData, datesRes] = await Promise.all([
           getVibeProfile().catch(() => null),
           getVibeStreak().catch(() => ({ current_streak: 0, cards_answered_today: 0 })),
-          getConnections().catch(() => ({ data: [] }))
+          getConnections().catch(() => ({ data: [] })),
+          listVibeDates(1, 100, Intl.DateTimeFormat().resolvedOptions().timeZone).catch(() => null)
         ]);
+
+        if (datesRes?.data) {
+           const upcoming = datesRes.data.filter((d: any) => d.status === "accepted" && new Date(`${d.date}T${d.time}`) >= new Date());
+           if (upcoming.length > 0) {
+               upcoming.sort((a: any, b: any) => new Date(`${a.date}T${a.time}`).getTime() - new Date(`${b.date}T${b.time}`).getTime());
+               setUpcomingDate(new Date(`${upcoming[0].date}T${upcoming[0].time}`));
+           }
+        }
 
         const allPartners = connsData?.data || [];
         if (profile) setMyUserId(profile.user_id);
@@ -283,7 +294,41 @@ export const PlayScreen: React.FC = () => {
       if (ws) ws.close();
       if (interval) clearInterval(interval);
     };
-  }, [revealed, theirPick, card?.id, partnerId, myUserId]);
+  }, [revealed, theirPick, card, partnerId, myUserId, partnerName]);
+
+  // Polling for Limit Reached State
+  useEffect(() => {
+    let interval: NodeJS.Timeout | null = null;
+    let cancelled = false;
+
+    if (showLimitReachedState && partnerId && allResults) {
+      const partnerData = allResults.find((r: any) => r.partner_name === partnerName);
+      // Only poll if both_finished is false
+      if (partnerData && !partnerData.both_finished) {
+        const checkResults = async () => {
+          if (cancelled) return;
+          try {
+            const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+            const results = await getVibeResults(partnerId, tz);
+            if (cancelled) return;
+            if (results?.data) {
+              setAllResults(results.data);
+            }
+          } catch (e) {
+            console.log("Limit reached poll error:", e);
+          }
+        };
+
+        // Poll every 3 seconds
+        interval = setInterval(checkResults, 3000);
+      }
+    }
+
+    return () => {
+      cancelled = true;
+      if (interval) clearInterval(interval);
+    };
+  }, [showLimitReachedState, partnerId, allResults, partnerName]);
 
   const matched = revealed && myPick !== null && theirPick !== null && myPick === theirPick;
 
@@ -431,25 +476,22 @@ export const PlayScreen: React.FC = () => {
                 </AppText>
               </AppText>
             </View>
-            <TouchableOpacity onPress={() => setPartnerSheet(true)} style={styles.partnerPill}>
-              <AppText
-                variant="mono"
-                color={Colors.accent}
-                style={{ fontSize: 10 }}
-              >
-                ● {partnerName.toUpperCase()}
-              </AppText>
-              {activePartners.length > 1 && (
-                <AppText color={Colors.accent} style={{ fontSize: 10, marginLeft: 4 }}>▼</AppText>
+            <View style={styles.partnerPill}>
+              {upcomingDate ? (
+                  <LiveCountdownNav targetDate={upcomingDate} />
+              ) : (
+                  <AppText variant="mono" size={10} color={Colors.accent}>
+                      NO UPCOMING DATES
+                  </AppText>
               )}
-            </TouchableOpacity>
+            </View>
           </View>
         </View>
 
         <View style={styles.inner}>
           {/* Progress Bar */}
           {(() => {
-             const conn = connectionsList.find(c => c.partner_id === partnerId);
+             const conn = connectionsList.find(c => c.user_id === partnerId);
              const currentDay = conn?.current_journey_day || 1;
              return (
                <View style={{ marginBottom: 24 }}>

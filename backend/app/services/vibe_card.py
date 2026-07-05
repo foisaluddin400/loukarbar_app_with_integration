@@ -25,18 +25,72 @@ class VibeCardService:
         await self.cumulative_scores.create_index([("user_id", 1), ("partner_id", 1)], unique=True)
         await self.user_streaks.create_index("user_id", unique=True)
 
-    async def get_daily_questions(self, user_id: str, partner_id: str) -> List[Dict[str, Any]]:
-        """Get the 3 questions for the current journey day of this connection."""
+    async def _ensure_current_journey_day(self, user_id: str, partner_id: str, tz_str: str) -> Optional[Dict]:
         conn = await self.vibe_connections.find_one({"user_id": user_id, "partner_id": partner_id})
-        if not conn or conn.get("status") != "active":
-            return []
+        if not conn or conn.get("status") != "active": return None
+
+        from datetime import datetime, timedelta, timezone
+        import zoneinfo
+        try:
+            tz = zoneinfo.ZoneInfo(tz_str)
+        except Exception:
+            tz = zoneinfo.ZoneInfo("UTC")
+            
+        now_utc = datetime.now(timezone.utc)
+        now_local = now_utc.astimezone(tz)
+        logical_today = (now_local - timedelta(hours=4)).date()
+        logical_today_str = logical_today.isoformat()
+
+        if conn.get("stalled_since"): return conn
+        if conn.get("current_journey_day", 1) >= 90: return conn
+
+        last_update_str = conn.get("last_journey_day_update_date")
+        if last_update_str == logical_today_str: return conn
+
+        # Needs update
+        last_ans = await self.user_answers.find_one(
+            {"user_id": user_id, "partner_id": partner_id},
+            sort=[("created_at", -1)]
+        )
+        
+        base_time_utc = last_ans["created_at"] if last_ans and "created_at" in last_ans else conn.get("connected_at", now_utc)
+        if base_time_utc.tzinfo is None:
+            base_time_utc = base_time_utc.replace(tzinfo=timezone.utc)
+        base_time_local = base_time_utc.astimezone(tz)
+        logical_base_date = (base_time_local - timedelta(hours=4)).date()
+
+        delta_days = (logical_today - logical_base_date).days
+        
+        if delta_days > 0 or not last_update_str:
+            new_day = conn.get("current_journey_day", 1) + max(1, delta_days)
+            new_day = min(new_day, 90)
+            await self.vibe_connections.update_many(
+                {"$or": [
+                    {"user_id": user_id, "partner_id": partner_id},
+                    {"user_id": partner_id, "partner_id": user_id}
+                ]},
+                {"$set": {
+                    "current_journey_day": new_day,
+                    "last_journey_day_update_date": logical_today_str
+                }}
+            )
+            conn["current_journey_day"] = new_day
+            conn["last_journey_day_update_date"] = logical_today_str
+            
+        return conn
+
+    async def get_daily_questions(self, user_id: str, partner_id: str, tz_str: str) -> Dict[str, Any]:
+        """Get the 3 questions for the current journey day of this connection."""
+        conn = await self._ensure_current_journey_day(user_id, partner_id, tz_str)
+        if not conn:
+            return {"questions": [], "current_journey_day": 1}
             
         current_day = conn.get("current_journey_day", 1)
         
         cursor = self.vibe_90day_cards.find({"day": current_day}).sort("slot", 1)
         cards = await cursor.to_list(length=None)
         
-        return [
+        qs = [
             {
                 "id": c["card_id"],
                 "text": f"Day {c['day']} - {c['category']}",
@@ -46,6 +100,7 @@ class VibeCardService:
                 "is_anchor": c.get("is_anchor", False)
             } for c in cards
         ]
+        return {"questions": qs, "current_journey_day": current_day}
 
     async def submit_answers(self, user_id: str, payload: VibeAnswerSubmit) -> Dict[str, Any]:
         """Submit answers for the specific partner's journey."""
@@ -82,7 +137,8 @@ class VibeCardService:
         )
         
         # Handle Anchor Logic
-        cards = await self.get_daily_questions(user_id, partner_id)
+        cards_data = await self.get_daily_questions(user_id, partner_id, payload.timezone)
+        cards = cards_data["questions"]
         has_anchor = any(c["is_anchor"] for c in cards)
         
         if has_anchor:
@@ -120,7 +176,7 @@ class VibeCardService:
         
         return {"success": True, "message": "Answers submitted!"}
 
-    async def get_match_results(self, user_id: str, partner_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    async def get_match_results(self, user_id: str, partner_id: Optional[str] = None, tz_str: str = "UTC") -> List[Dict[str, Any]]:
         if not partner_id:
             return []
             
@@ -137,7 +193,8 @@ class VibeCardService:
         
         if not my_ans: return []
         
-        questions = await self.get_daily_questions(user_id, partner_id)
+        cards_data = await self.get_daily_questions(user_id, partner_id, tz_str)
+        questions = cards_data["questions"]
         q_map = {q["id"]: q for q in questions}
         
         my_map = {a["question_id"]: a["selected_option"] for a in my_ans.get("answers", [])}
@@ -223,52 +280,62 @@ class VibeCardService:
             "both_finished": both_finished
         }]
 
-    async def get_streak(self, user_id: str) -> Dict[str, Any]:
-        cursor = self.user_answers.find({"user_id": user_id}).sort("created_at", -1)
-        answers = await cursor.to_list(length=None)
+    async def get_streak(self, user_id: str, user_timezone: str = "UTC") -> Dict[str, Any]:
+        # Find active connection
+        conn = await self.vibe_connections.find_one({
+            "$or": [{"user_id": user_id}, {"partner_id": user_id}],
+            "status": "active"
+        })
         
-        if not answers:
+        if not conn:
             return {"current_streak": 0, "last_answered": None, "cards_answered_today": 0}
             
-        # Extract unique dates (UTC)
-        unique_dates = []
-        for doc in answers:
-            if "created_at" in doc:
-                dt = doc["created_at"].date()
-                if dt not in unique_dates:
-                    unique_dates.append(dt)
+        partner_id = conn["partner_id"] if conn["user_id"] == user_id else conn["user_id"]
         
-        if not unique_dates:
+        # Ensure current_journey_day is up to date
+        conn = await self._ensure_current_journey_day(user_id, partner_id, user_timezone)
+        if not conn:
             return {"current_streak": 0, "last_answered": None, "cards_answered_today": 0}
             
-        today = datetime.now(timezone.utc).date()
-        yesterday = today - timedelta(days=1)
+        current_day = conn.get("current_journey_day", 1)
+        
+        # Get answers for both users
+        my_ans_cursor = self.user_answers.find({"user_id": user_id, "partner_id": partner_id})
+        pa_ans_cursor = self.user_answers.find({"user_id": partner_id, "partner_id": user_id})
+        
+        my_ans = await my_ans_cursor.to_list(length=None)
+        pa_ans = await pa_ans_cursor.to_list(length=None)
+        
+        # Find journey_days where BOTH answered
+        my_days = {doc["journey_day"] for doc in my_ans if "journey_day" in doc}
+        pa_days = {doc["journey_day"] for doc in pa_ans if "journey_day" in doc}
+        both_days = my_days.intersection(pa_days)
         
         current_streak = 0
-        cards_today = sum(len(doc.get("answers", [])) for doc in answers if "created_at" in doc and doc["created_at"].date() == today)
-        
-        # If they haven't answered today or yesterday, streak is broken
-        if today not in unique_dates and yesterday not in unique_dates:
-            return {
-                "current_streak": 0, 
-                "last_answered": unique_dates[0].isoformat(), 
-                "cards_answered_today": cards_today
-            }
-            
-        # Count consecutive days backwards from the latest date they answered (which is either today or yesterday)
-        check_date = today if today in unique_dates else yesterday
-        for d in unique_dates:
-            if d == check_date:
+        for day in range(current_day, 0, -1):
+            if day in both_days:
                 current_streak += 1
-                check_date -= timedelta(days=1)
-            elif d > check_date:
-                continue # ignore multiple entries on same day if any
+            elif day == current_day:
+                # Today hasn't expired yet, so not answering yet doesn't break the streak
+                continue
             else:
-                break # Streak broken
+                # An expired day wasn't answered by both, streak breaks
+                break
+                
+        # Cards answered today
+        my_today_doc = next((doc for doc in my_ans if doc.get("journey_day") == current_day), None)
+        cards_today = len(my_today_doc.get("answers", [])) if my_today_doc else 0
+        
+        # Last answered time
+        last_answered = None
+        if my_ans:
+            sorted_ans = sorted([d for d in my_ans if "created_at" in d], key=lambda x: x["created_at"], reverse=True)
+            if sorted_ans:
+                last_answered = sorted_ans[0]["created_at"].isoformat()
                 
         return {
             "current_streak": current_streak,
-            "last_answered": unique_dates[0].isoformat(),
+            "last_answered": last_answered,
             "cards_answered_today": cards_today
         }
 
@@ -369,8 +436,169 @@ class VibeCardService:
 
         return paginated_items, total, total_matched, total_differed
 
-    async def get_pulse_analytics(self, user_id: str, partner_id: Optional[str] = None) -> List[Dict[str, Any]]:
-        # Legacy stub
-        return []
+    async def get_pulse_analytics(self, user_id: str, partner_id: Optional[str] = None) -> Dict[str, Any]:
+        if not partner_id:
+            return {
+                "partner_id": "", "partner_name": "", "overall_match_percentage": 0.0,
+                "total_cards_played": 0, "total_matches": 0, "timeline": [], "by_depth": [],
+                "by_category": [], "key_agreements": [], "key_disagreements": [],
+                "strongest_category": None, "divergent_category": None
+            }
+
+        user_profile = await self.vibe_profiles.find_one({"user_id": user_id})
+        partner_profile = await self.vibe_profiles.find_one({"user_id": partner_id})
+        
+        my_name = user_profile["name"] if user_profile else "You"
+        pa_name = partner_profile["name"] if partner_profile else "Partner"
+
+        # Fetch all questions
+        questions = await self.vibe_90day_cards.find().to_list(length=None)
+        q_map = {q["card_id"]: q for q in questions}
+
+        # Fetch answers
+        my_ans = await self.user_answers.find({"user_id": user_id, "partner_id": partner_id}).to_list(length=None)
+        pa_ans = await self.user_answers.find({"user_id": partner_id, "partner_id": user_id}).to_list(length=None)
+        
+        pa_ans_map_all = {}
+        for doc in pa_ans:
+            for ans in doc.get("answers", []):
+                pa_ans_map_all[ans["question_id"]] = ans["selected_option"]
+
+        total_cards = 0
+        total_matches = 0
+        
+        timeline_data = {}
+        cat_data = {}
+        depth_data = {}
+
+        history_items = []
+
+        for doc in my_ans:
+            journey_day = doc.get("journey_day", 1)
+            date_str = f"Day {journey_day}"
+            
+            for ans in doc.get("answers", []):
+                qid = ans["question_id"]
+                my_choice = ans["selected_option"]
+                pa_choice = pa_ans_map_all.get(qid)
+                
+                if pa_choice:
+                    q = q_map.get(qid)
+                    if not q: continue
+                    
+                    is_match = (my_choice == pa_choice)
+                    total_cards += 1
+                    if is_match:
+                        total_matches += 1
+                        
+                    # Timeline
+                    if journey_day not in timeline_data:
+                        timeline_data[journey_day] = {"matches": 0, "total": 0}
+                    timeline_data[journey_day]["total"] += 1
+                    if is_match: timeline_data[journey_day]["matches"] += 1
+                    
+                    # Category
+                    cat = q.get("category", "General")
+                    if cat not in cat_data:
+                        cat_data[cat] = {"matches": 0, "total": 0}
+                    cat_data[cat]["total"] += 1
+                    if is_match: cat_data[cat]["matches"] += 1
+                    
+                    # Depth
+                    depth = q.get("depth", "Surface")
+                    depth = depth.title() if depth else "Surface"
+                    if depth not in depth_data:
+                        depth_data[depth] = {"matches": 0, "total": 0}
+                    depth_data[depth]["total"] += 1
+                    if is_match: depth_data[depth]["matches"] += 1
+
+                    my_ans_text = q["option_a"] if my_choice == "A" else q["option_b"]
+                    pa_ans_text = q["option_a"] if pa_choice == "A" else q["option_b"]
+                    
+                    history_items.append({
+                        "date": date_str,
+                        "question": f"Day {q['day']} - {q['category']}",
+                        "category": cat,
+                        "option_a": q["option_a"],
+                        "option_b": q["option_b"],
+                        "user_name": my_name,
+                        "user_answer": my_ans_text,
+                        "partner_name": pa_name,
+                        "partner_answer": pa_ans_text,
+                        "is_match": is_match,
+                        "journey_day": journey_day
+                    })
+
+        overall_match_percentage = round((total_matches / total_cards * 100) if total_cards > 0 else 0, 1)
+
+        # Timeline entries
+        timeline = []
+        for day in sorted(timeline_data.keys()):
+            d = timeline_data[day]
+            timeline.append({
+                "day": day,
+                "matches": d["matches"],
+                "total": d["total"],
+                "match_percentage": round((d["matches"] / d["total"] * 100), 1)
+            })
+
+        # By Category
+        by_category = []
+        for cat, d in cat_data.items():
+            by_category.append({
+                "category": cat,
+                "match_percentage": round((d["matches"] / d["total"] * 100), 1),
+                "matched_questions": d["matches"],
+                "total_questions": d["total"]
+            })
+        by_category.sort(key=lambda x: x["total_questions"], reverse=True)
+        
+        strongest_category = None
+        divergent_category = None
+        if by_category:
+            valid_cats = [c for c in by_category if c["total_questions"] >= 1]
+            if valid_cats:
+                strongest_category = max(valid_cats, key=lambda x: x["match_percentage"])
+                divergent_category = min(valid_cats, key=lambda x: x["match_percentage"])
+
+        # By Depth
+        by_depth = []
+        for dpt, d in depth_data.items():
+            by_depth.append({
+                "depth": dpt,
+                "matches": d["matches"],
+                "total": d["total"],
+                "match_percentage": round((d["matches"] / d["total"] * 100), 1)
+            })
+        
+        depth_order = {"Surface": 1, "Medium": 2, "Deep": 3}
+        by_depth.sort(key=lambda x: depth_order.get(x["depth"], 99))
+
+        # Key Agreements and Disagreements
+        history_items.sort(key=lambda x: x["journey_day"], reverse=True)
+        
+        agreements = [h for h in history_items if h["is_match"]]
+        disagreements = [h for h in history_items if not h["is_match"]]
+        
+        key_agreements = agreements[:3]
+        key_disagreements = disagreements[:3]
+
+        for item in key_agreements + key_disagreements:
+            item.pop("journey_day", None)
+
+        return {
+            "partner_id": partner_id,
+            "partner_name": pa_name,
+            "overall_match_percentage": overall_match_percentage,
+            "total_cards_played": total_cards,
+            "total_matches": total_matches,
+            "timeline": timeline,
+            "by_depth": by_depth,
+            "by_category": by_category,
+            "key_agreements": key_agreements,
+            "key_disagreements": key_disagreements,
+            "strongest_category": strongest_category,
+            "divergent_category": divergent_category
+        }
 
 vibe_card_service = VibeCardService()

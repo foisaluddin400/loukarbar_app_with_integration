@@ -3,7 +3,7 @@ import uuid
 import shutil
 from fastapi import APIRouter, HTTPException, Depends, status, UploadFile, File
 from fastapi.responses import FileResponse
-from app.schemas.relationships import RelationshipCreate, RelationshipResponse, AlignRequest, AlignResponse
+from app.schemas.relationships import RelationshipCreate, RelationshipResponse, AlignRequest, AlignResponse, BreakAlignmentRequest
 from app.services.relationships import relationship_service
 from app.routers.auth import get_current_user
 from app.schemas.auth import UserUpdate
@@ -119,12 +119,61 @@ async def align_users(payload: AlignRequest, current_user: dict = Depends(get_cu
         )
 
 @router.post("/break-alignment", response_model=AlignResponse, status_code=status.HTTP_200_OK, response_model_exclude_none=True)
-async def break_alignment(current_user: dict = Depends(get_current_user)):
+async def break_alignment(payload: BreakAlignmentRequest, current_user: dict = Depends(get_current_user)):
     """
-    Breaks the connection between the authenticated user and their partner.
+    Breaks the connection between the authenticated user and their partner, requiring a password.
     """
     try:
+        from bson import ObjectId
+        from app.services.auth import verify_password
+        
+        # Verify password
+        user_record = await relationship_service.collection.find_one({"_id": ObjectId(current_user["id"])})
+        if not user_record:
+            raise ValueError("User not found")
+            
+        hashed_password = user_record.get("password_hash")
+        if not hashed_password or not verify_password(payload.password, hashed_password):
+            raise ValueError("Incorrect password.")
+            
         updated_user = await relationship_service.break_alignment(current_user["id"])
+        
+        # Also auto-demote the vibe ladder for both users
+        from app.services.vibe_pulse import vibe_pulse_service
+        from app.schemas.vibe_pulse import PulseStatus
+        from datetime import datetime, timezone
+        
+        now = datetime.now(timezone.utc)
+        partner_id = user_record.get("partner", {}).get("user_id")
+        
+        if partner_id:
+            # 1. Demote current user's pulse
+            await vibe_pulse_service.pulses.update_one(
+                {"user_id": current_user["id"], "partner_id": partner_id, "status": PulseStatus.ALIGNED.value},
+                {"$set": {
+                    "status": PulseStatus.SERIOUS.value,
+                    "updated_at": now
+                }}
+            )
+            
+            # 2. Demote partner's pulse
+            their_pulse = await vibe_pulse_service.pulses.find_one({"user_id": partner_id, "partner_id": current_user["id"]})
+            if their_pulse and their_pulse["status"] == PulseStatus.ALIGNED:
+                await vibe_pulse_service.pulses.update_one(
+                    {"user_id": partner_id, "partner_id": current_user["id"]},
+                    {"$set": {
+                        "status": PulseStatus.SERIOUS.value,
+                        "updated_at": now
+                    }}
+                )
+                
+            # Broadcast update to partner so their screen refreshes
+            try:
+                from app.core.websocket import ws_manager
+                await ws_manager.broadcast_to_user(partner_id, {"type": "PULSE_UPDATED"})
+            except Exception:
+                pass
+        
         return AlignResponse(
             success=True,
             message="Relationship alignment broken successfully.",

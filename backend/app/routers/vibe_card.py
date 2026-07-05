@@ -82,16 +82,20 @@ async def get_daily_cards(
     current_user: dict = Depends(get_current_user)
 ):
     """Fetch today's 3 'This or That' questions."""
-    questions = await vibe_card_service.get_daily_questions(current_user["id"], partner_id)
-    from datetime import datetime
+    daily_data = await vibe_card_service.get_daily_questions(current_user["id"], partner_id, timezone)
+    from datetime import datetime, timedelta
     import zoneinfo
     try:
         tz = zoneinfo.ZoneInfo(timezone)
     except:
         tz = zoneinfo.ZoneInfo("UTC")
-    today_str = datetime.now(tz).strftime("%m.%d.%Y")
+    today_str = (datetime.now(tz) - timedelta(hours=4)).strftime("%m.%d.%Y")
     
-    return {"date": today_str, "questions": questions}
+    return {
+        "date": today_str, 
+        "questions": daily_data["questions"],
+        "current_journey_day": daily_data["current_journey_day"]
+    }
 
 @router.post("/answer", response_model=GenericResponse)
 async def submit_vibe_answers(
@@ -129,7 +133,7 @@ async def get_vibe_results(
 ):
     """Compare today's results with partners. If partner_id is not provided, shows all connected partners who answered today."""
     try:
-        results = await vibe_card_service.get_match_results(current_user["id"], partner_id)
+        results = await vibe_card_service.get_match_results(current_user["id"], partner_id, timezone)
         return VibeMultiMatchResult(success=True, data=results)
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))
@@ -142,4 +146,4 @@ async def get_vibe_streak(
     current_user: dict = Depends(get_current_user)
 ):
     """Get your current Vibe Card answering streak."""
-    return await vibe_card_service.get_streak(current_user["id"])
+    return await vibe_card_service.get_streak(current_user["id"], timezone)

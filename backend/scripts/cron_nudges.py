@@ -19,13 +19,6 @@ async def process_nudges():
         stalled_since = conn.get("stalled_since")
         
         if not stalled_since:
-            # Not stalled, increment day if not 90
-            current_day = conn.get("current_journey_day", 1)
-            if current_day < 90:
-                await connections.update_one(
-                    {"_id": conn["_id"]},
-                    {"$set": {"current_journey_day": current_day + 1}}
-                )
             continue
         
         # Connection is stalled

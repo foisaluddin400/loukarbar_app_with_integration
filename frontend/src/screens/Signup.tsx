@@ -59,6 +59,8 @@ const Signup = () => {
             placeholder="lou@example.com"
             keyboardType="email-address"
             autoCapitalize="none"
+            autoComplete="email"
+            textContentType="emailAddress"
           />
 
           <View style={{ marginTop: 24 }}>
@@ -69,6 +71,8 @@ const Signup = () => {
               onChangeText={(t) => { setPassword(t); setErrorMsg(''); }}
               placeholder="••••••••"
               isPassword
+              autoComplete="new-password"
+              textContentType="newPassword"
             />
           </View>
         </View>

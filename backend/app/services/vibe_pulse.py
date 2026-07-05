@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from app.core.config import settings
 from app.schemas.vibe_pulse import (
     VibePulseSetRequest, PulseStatus, VibePulseResponse, AlignedCheckResponse,
-    VibeFlagCreate, VibeFlagUpdate, FlagType
+    VibeFlagCreate, VibeFlagUpdate, FlagType, FlagCategory
 )
 from app.services.vibe_check import vibe_check_service
 from app.services.relationships import relationship_service
@@ -28,12 +28,7 @@ class VibePulseService:
     # --- Flag Methods ---
 
     async def create_flag(self, user_id: str, payload: VibeFlagCreate) -> Dict[str, Any]:
-        """Creates a relationship flag."""
-        import zoneinfo
-        try:
-            tz = zoneinfo.ZoneInfo(payload.timezone)
-        except:
-            tz = zoneinfo.ZoneInfo("UTC")
+        """Creates a relationship flag. Sends notification for public red flags."""
 
         now = datetime.now(timezone.utc)
 
@@ -50,6 +45,31 @@ class VibePulseService:
 
         res = await self.flags.insert_one(doc)
         doc["id"] = str(res.inserted_id)
+
+        # --- WebSocket: notify both users so their flag lists refresh instantly ---
+        from app.core.websocket import ws_manager
+        ws_event = {"type": "FLAG_CREATED", "flag_id": doc["id"], "category": str(payload.category.value), "visibility": str(payload.type.value)}
+        await ws_manager.broadcast_to_user(user_id, ws_event)
+        await ws_manager.broadcast_to_user(payload.partner_id, ws_event)
+
+        # --- Notification: public red flags alert the partner ---
+        if payload.type == FlagType.PUBLIC and payload.category == FlagCategory.RED:
+            from app.services.notification import notification_service
+            from app.schemas.notification import NotificationCreate, NotificationType
+
+            # Look up the creator's name for a human-readable notification
+            user = await self.db["users"].find_one({"_id": ObjectId(user_id)})
+            sender_name = user.get("name", "Your partner") if user else "Your partner"
+
+            notif = NotificationCreate(
+                recipient_id=payload.partner_id,
+                title="🚩 Red Flag Raised",
+                message=f"{sender_name} raised a public red flag: \"{payload.text}\"",
+                type=NotificationType.RED_FLAG,
+                timezone=payload.timezone,
+            )
+            await notification_service.schedule_notification(user_id, notif)
+
         return doc
 
     async def get_my_flags(self, user_id: str, partner_id: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -100,7 +120,8 @@ class VibePulseService:
         res = await self.flags.delete_one({"_id": ObjectId(flag_id), "user_id": user_id})
         return res.deleted_count > 0
 
-    # --- Pulse Methods ---
+    # Canonical ladder order for sequential enforcement
+    LADDER_ORDER = ["Talking", "Dating", "Seeing", "Working", "Exclusive", "FWB", "Serious", "Aligned"]
 
     async def set_pulse(self, user_id: str, payload: VibePulseSetRequest) -> Dict[str, Any]:
         # 1. Verify connection
@@ -110,13 +131,34 @@ class VibePulseService:
 
         now = datetime.now(timezone.utc)
 
-        # 2. Special Logic for Aligned
+        # 2. Sequential step enforcement
+        my_pulse = await self.pulses.find_one({"user_id": user_id, "partner_id": payload.partner_id})
+        current_status = my_pulse["status"] if my_pulse else PulseStatus.NONE
+
+        if current_status == PulseStatus.NONE:
+            # First time — must start at Talking
+            if payload.status != PulseStatus.TALKING:
+                raise ValueError("You must start at Talking before moving up the ladder.")
+        else:
+            # Enforce +1 or -1 step movement
+            try:
+                current_idx = self.LADDER_ORDER.index(current_status)
+            except ValueError:
+                current_idx = 0  # fallback
+            try:
+                target_idx = self.LADDER_ORDER.index(payload.status.value)
+            except ValueError:
+                raise ValueError(f"Invalid ladder step: {payload.status.value}")
+
+            diff = target_idx - current_idx
+            if diff not in (1, -1):
+                raise ValueError("You can only move one step at a time on the ladder.")
+
+        # 3. Special Logic for Aligned
         if payload.status == PulseStatus.ALIGNED:
             # A. Check main relationship profile
             user_profile = await self.db["users"].find_one({"_id": ObjectId(user_id)})
             if user_profile and user_profile.get("is_aligned"):
-                # If they are aligned in main profile, they can ONLY set Aligned in ladder
-                # if the partner_id matches their main partner.
                 main_partner_id = user_profile.get("partner", {}).get("user_id")
                 if main_partner_id != payload.partner_id:
                     raise ValueError("You are already Aligned with another person in your main relationship.")
@@ -130,7 +172,18 @@ class VibePulseService:
             if existing_aligned:
                 raise ValueError("You are already Aligned with another person in the Vibe Ladder. Please reset that status first.")
 
-        # 3. Update status
+            # C. Require partner to be at Serious or higher before Aligned
+            their_pulse = await self.pulses.find_one({"user_id": payload.partner_id, "partner_id": user_id})
+            their_status = their_pulse["status"] if their_pulse else PulseStatus.NONE
+            try:
+                their_idx = self.LADDER_ORDER.index(their_status)
+            except ValueError:
+                their_idx = -1
+            serious_idx = self.LADDER_ORDER.index("Serious")
+            if their_idx < serious_idx:
+                raise ValueError("Your partner must be at Serious or higher before you can select Aligned.")
+
+        # 4. Update status
         await self.pulses.update_one(
             {"user_id": user_id, "partner_id": payload.partner_id},
             {"$set": {
@@ -140,18 +193,84 @@ class VibePulseService:
             upsert=True
         )
 
+        # 5. Handle Demotion & Alignment Breaking
+        try:
+            new_idx = self.LADDER_ORDER.index(payload.status.value)
+            serious_idx = self.LADDER_ORDER.index("Serious")
+            
+            # A. Prevent stepping down from Aligned directly without password ONLY if officially aligned
+            if current_status == PulseStatus.ALIGNED and payload.status != PulseStatus.ALIGNED:
+                user_profile = await self.db["users"].find_one({"_id": ObjectId(user_id)})
+                if user_profile and user_profile.get("is_aligned"):
+                    raise ValueError("To break alignment and step down, please use the Break Alignment button and confirm your password.")
+
+            # B. If I am dropping below Serious, auto-demote partner if they are at Aligned
+            elif new_idx < serious_idx:
+                await self.pulses.update_one(
+                    {"user_id": payload.partner_id, "partner_id": user_id, "status": PulseStatus.ALIGNED.value},
+                    {"$set": {
+                        "status": PulseStatus.SERIOUS.value,
+                        "updated_at": now
+                    }}
+                )
+        except ValueError as e:
+            if str(e).startswith("To break"):
+                raise e
+            pass
+
+
         status = await self.get_pulse_status(user_id, payload.partner_id)
 
-        # 4. Trigger Main Relationship Alignment if mutual Aligned
+        # 6. Trigger Main Relationship Alignment if mutual Aligned
         if status.get("is_aligned_matched"):
-            # This will update the 'users' collection for both users
+            user_profile = await self.db["users"].find_one({"_id": ObjectId(user_id)})
+            was_already_aligned = user_profile.get("is_aligned", False) if user_profile else False
+
             await relationship_service.align_users_mutually(user_id, payload.partner_id)
+
+            if not was_already_aligned:
+                from app.services.notification import notification_service
+                from app.schemas.notification import NotificationCreate, NotificationType
+                
+                initiator_name = user_profile.get("name", "Your partner") if user_profile else "Your partner"
+
+                try:
+                    await notification_service.schedule_notification(
+                        sender_id=user_id,
+                        payload=NotificationCreate(
+                            recipient_id=payload.partner_id,
+                            title="Alignment Complete! 🎉",
+                            message=f"{initiator_name} has just aligned with you on the ladder. You are now officially a couple!",
+                            type=NotificationType.SYSTEM,
+                            scheduled_for=now,
+                            timezone="UTC"
+                        )
+                    )
+                except Exception as e:
+                    print(f"Failed to send alignment notification: {e}")
+
+        # Broadcast pulse updated event to partner
+        try:
+            from app.core.websocket import ws_manager
+            await ws_manager.broadcast_to_user(payload.partner_id, {"type": "PULSE_UPDATED"})
+        except Exception as e:
+            print(f"Failed to broadcast PULSE_UPDATED: {e}")
 
         return status
 
     async def get_pulse_status(self, user_id: str, partner_id: str) -> Dict[str, Any]:
-        # Get my status for them
+        # Get my status for them — auto-start at Talking if no record exists
         my_pulse = await self.pulses.find_one({"user_id": user_id, "partner_id": partner_id})
+        if not my_pulse:
+            # Auto-create a Talking pulse for this user+partner pair
+            now = datetime.now(timezone.utc)
+            await self.pulses.update_one(
+                {"user_id": user_id, "partner_id": partner_id},
+                {"$set": {"status": PulseStatus.TALKING, "updated_at": now}},
+                upsert=True
+            )
+            my_pulse = await self.pulses.find_one({"user_id": user_id, "partner_id": partner_id})
+
         my_status = my_pulse["status"] if my_pulse else PulseStatus.NONE
 
         # Get their status for me

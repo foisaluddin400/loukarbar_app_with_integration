@@ -30,33 +30,6 @@ async def list_vibe_pulses(current_user: dict = Depends(get_current_user)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.get("/{partner_id}", response_model=VibePulseResponse)
-async def get_vibe_pulse_status(partner_id: str, current_user: dict = Depends(get_current_user)):
-    """Get relationship status with a specific partner."""
-    try:
-        return await vibe_pulse_service.get_pulse_status(current_user["id"], partner_id)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.get("/check-aligned/{partner_id}", response_model=AlignedCheckResponse)
-async def check_aligned_connection(partner_id: str, current_user: dict = Depends(get_current_user)):
-    """Check if both user and partner have set 'Aligned' status with each other."""
-    try:
-        return await vibe_pulse_service.check_aligned_connection(current_user["id"], partner_id)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.delete("/{partner_id}")
-async def delete_vibe_pulse(partner_id: str, current_user: dict = Depends(get_current_user)):
-    """Reset relationship status with a partner."""
-    try:
-        success = await vibe_pulse_service.delete_pulse(current_user["id"], partner_id)
-        if not success:
-             raise HTTPException(status_code=404, detail="Pulse status not found.")
-        return {"success": True, "message": "Pulse status reset successfully."}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
 @router.get("/insights/analytics", response_model=PulseAnalyticsResponse)
 async def get_pulse_analytics(partner_id: Optional[str] = None, current_user: dict = Depends(get_current_user)):
     """Fetch detailed matching analytics for vibe partners."""
@@ -104,13 +77,40 @@ async def update_flag(flag_id: str, payload: VibeFlagUpdate, current_user: dict 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.delete("/flags/{flag_id}")
+@router.delete("/flags/{flag_id}", response_model=dict)
 async def delete_flag(flag_id: str, current_user: dict = Depends(get_current_user)):
     """Delete a flag."""
     try:
         success = await vibe_pulse_service.delete_flag(current_user["id"], flag_id)
         if not success:
-            raise HTTPException(status_code=404, detail="Flag not found.")
-        return {"success": True, "message": "Flag deleted successfully."}
+            raise HTTPException(status_code=404, detail="Flag not found or unauthorized.")
+        return {"success": True, "message": "Flag deleted"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/check-aligned/{partner_id}", response_model=AlignedCheckResponse)
+async def check_aligned_connection(partner_id: str, current_user: dict = Depends(get_current_user)):
+    """Check if both user and partner have set 'Aligned' status with each other."""
+    try:
+        return await vibe_pulse_service.check_aligned_connection(current_user["id"], partner_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/{partner_id}", response_model=VibePulseResponse)
+async def get_vibe_pulse_status(partner_id: str, current_user: dict = Depends(get_current_user)):
+    """Get relationship status with a specific partner."""
+    try:
+        return await vibe_pulse_service.get_pulse_status(current_user["id"], partner_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/{partner_id}")
+async def delete_vibe_pulse(partner_id: str, current_user: dict = Depends(get_current_user)):
+    """Reset relationship status with a partner."""
+    try:
+        success = await vibe_pulse_service.delete_pulse(current_user["id"], partner_id)
+        if not success:
+             raise HTTPException(status_code=404, detail="Pulse status not found.")
+        return {"success": True, "message": "Pulse status reset successfully."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

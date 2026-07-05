@@ -8,6 +8,7 @@ import {
   Alert,
   RefreshControl,
   DeviceEventEmitter,
+  Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Colors } from "../../constants/colors";
@@ -18,6 +19,7 @@ import { BottomSheet } from "../../components/ui/BottomSheet";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRoute, RouteProp } from "@react-navigation/native";
+import Swipeable from "react-native-gesture-handler/Swipeable";
 
 import SamVibeNav from "@/components/ui/SamVibeNav";
 import { getVibeProfile } from "../../services/vibeCheckApi";
@@ -26,10 +28,56 @@ import {
   listVibeDates,
   updateVibeDate,
   deleteVibeDate,
+  cancelVibeDate,
   respondToVibeDate,
+  markDatesSeen,
+  completeVibeDate,
+  hideVibeDate,
 } from "../../services/vibeDatesApi";
 
 const getTimezone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+const LiveCountdown = ({ targetDate }: { targetDate: Date }) => {
+  const [timeLeft, setTimeLeft] = useState("");
+
+  useEffect(() => {
+    const updateTimer = () => {
+      const now = new Date();
+      const diff = targetDate.getTime() - now.getTime();
+      
+      if (diff <= -6 * 60 * 60 * 1000) {
+        setTimeLeft("Date passed!");
+        return;
+      }
+      
+      if (diff <= 0) {
+        setTimeLeft("Happening now!");
+        return;
+      }
+      
+      const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+      const hours = Math.floor((diff / (1000 * 60 * 60)) % 24);
+      const minutes = Math.floor((diff / 1000 / 60) % 60);
+      const seconds = Math.floor((diff / 1000) % 60);
+
+      if (days > 0) {
+        setTimeLeft(`You have a date in ${days} days, ${hours} hours`);
+      } else {
+        setTimeLeft(`You have a date in ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`);
+      }
+    };
+    
+    updateTimer();
+    const interval = setInterval(updateTimer, 1000);
+    return () => clearInterval(interval);
+  }, [targetDate]);
+
+  return (
+    <AppText variant="mono" size={12} color={Colors.accent} style={{ marginTop: 4 }}>
+      {timeLeft}
+    </AppText>
+  );
+};
 
 export const VCDatesScreen: React.FC = () => {
   const [dates, setDates] = useState<any[]>([]);
@@ -42,6 +90,7 @@ export const VCDatesScreen: React.FC = () => {
   const [partnerName, setPartnerName] = useState("Partner");
 
   const [sheet, setSheet] = useState(false);
+  const [cancelSheetDate, setCancelSheetDate] = useState<any>(null);
   const [editingDate, setEditingDate] = useState<any | null>(null);
 
   // Form States
@@ -95,6 +144,10 @@ export const VCDatesScreen: React.FC = () => {
       if (res?.data) {
         setDates(res.data);
       }
+      
+      // Mark dates as seen so the badge clears when user views this screen
+      await markDatesSeen().catch(() => null);
+      DeviceEventEmitter.emit("REFRESH_VIBE_DATA");
     } catch (e) {
       console.error(e);
     } finally {
@@ -105,6 +158,7 @@ export const VCDatesScreen: React.FC = () => {
   useFocusEffect(
     useCallback(() => {
       fetchData();
+      DeviceEventEmitter.emit("CLEAR_DATES_BADGE");
     }, [fetchData])
   );
 
@@ -184,6 +238,16 @@ export const VCDatesScreen: React.FC = () => {
     setSheet(true);
   };
 
+  const openCloneSheet = (d: any) => {
+    setEditingDate(null);
+    setPlace(d.where);
+    setSelectedDate(new Date());
+    setSelectedTime(new Date());
+    setMeetType(d.how_we_meet as any);
+    setNote(d.note || "");
+    setSheet(true);
+  };
+
   const saveDate = async () => {
     if (!partnerId) {
       Alert.alert("No Partner", "You need an active partner to propose a date.");
@@ -191,6 +255,13 @@ export const VCDatesScreen: React.FC = () => {
     }
     if (!place.trim()) {
       Alert.alert("Missing Info", "Please enter where you're going.");
+      return;
+    }
+
+    const proposedDateTime = new Date(selectedDate);
+    proposedDateTime.setHours(selectedTime.getHours(), selectedTime.getMinutes(), 0, 0);
+    if (proposedDateTime < new Date()) {
+      Alert.alert("Invalid Time", "You cannot propose a date in the past. Please update the date and time.");
       return;
     }
 
@@ -205,7 +276,11 @@ export const VCDatesScreen: React.FC = () => {
 
     try {
       if (editingDate) {
-        await updateVibeDate(editingDate.id, payload);
+        if (editingDate.partner_id === myUserId) {
+          await respondToVibeDate(editingDate.id, { ...payload, action: "proposed_changes" });
+        } else {
+          await updateVibeDate(editingDate.id, payload);
+        }
       } else {
         await proposeVibeDate({ ...payload, partner_id: partnerId });
       }
@@ -217,27 +292,32 @@ export const VCDatesScreen: React.FC = () => {
     }
   };
 
-  const handleCancelDate = (id: string) => {
-    Alert.alert(
-      "Cancel Date",
-      "Are you sure you want to cancel this date proposal?",
-      [
-        { text: "No", style: "cancel" },
-        {
-          text: "Yes",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              await deleteVibeDate(id);
-              fetchData();
-              DeviceEventEmitter.emit("REFRESH_VIBE_DATA");
-            } catch (e: any) {
-              Alert.alert("Error", e.response?.data?.detail || "Failed to cancel date.");
-            }
-          },
-        },
-      ]
-    );
+  const handleCancelDate = (dateItem: any) => {
+    setCancelSheetDate(dateItem);
+  };
+
+  const executeCancel = async (dateItem: any) => {
+    try {
+      if (dateItem.status === "accepted") {
+        await cancelVibeDate(dateItem.id);
+      } else {
+        await deleteVibeDate(dateItem.id);
+      }
+      fetchData();
+      DeviceEventEmitter.emit("REFRESH_VIBE_DATA");
+    } catch (e: any) {
+      Alert.alert("Error", e.response?.data?.detail || e.message || "Failed to cancel date.");
+    }
+  };
+
+  const handleCompleteDate = async (dateItem: any) => {
+    try {
+      await completeVibeDate(dateItem.id);
+      fetchData();
+      DeviceEventEmitter.emit("REFRESH_VIBE_DATA");
+    } catch (e: any) {
+      Alert.alert("Error", e.response?.data?.detail || e.message || "Failed to mark date as completed.");
+    }
   };
 
   const handleRespond = async (id: string, action: "accepted" | "rejected") => {
@@ -250,22 +330,36 @@ export const VCDatesScreen: React.FC = () => {
     }
   };
 
+  const handleHideDate = async (dateId: string) => {
+    setDates((prev) => prev.filter((d) => d.id !== dateId));
+    try {
+      await hideVibeDate(dateId);
+      DeviceEventEmitter.emit("REFRESH_VIBE_DATA");
+    } catch (e: any) {
+      Alert.alert("Error", "Failed to hide date.");
+      fetchData(); 
+    }
+  };
+
+  const renderRightActions = () => (
+    <View style={styles.hideAction}>
+      <Ionicons name="eye-off-outline" size={24} color={Colors.surface} />
+      <AppText color={Colors.surface} variant="mono" style={{ fontSize: 10, marginTop: 4 }}>HIDE</AppText>
+    </View>
+  );
+
   // Filter dates for the active partner
   const partnerDates = dates.filter(
     (d) => d.partner_id === partnerId || d.proposer_id === partnerId
   );
 
-  const upcoming = partnerDates.filter((d) => {
-    if (d.status === "rejected") return false;
-    const dateObj = new Date(`${d.date}T${d.time}`);
-    return dateObj >= new Date(new Date().setHours(0, 0, 0, 0));
-  });
+  const upcoming = partnerDates.filter((d) => 
+    ["pending", "proposed_changes", "accepted"].includes(d.status)
+  );
 
-  const past = partnerDates.filter((d) => {
-    if (d.status === "rejected") return false;
-    const dateObj = new Date(`${d.date}T${d.time}`);
-    return dateObj < new Date(new Date().setHours(0, 0, 0, 0));
-  });
+  const past = partnerDates.filter((d) => 
+    ["rejected", "cancelled", "completed"].includes(d.status)
+  );
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -325,6 +419,10 @@ export const VCDatesScreen: React.FC = () => {
                   statusColor = isMine ? Colors.sage : Colors.muted;
               }
 
+              const [y, m, d] = dateItem.date.split("-").map(Number);
+              const [h, min] = dateItem.time.split(":").map(Number);
+              const targetDate = new Date(y, m - 1, d, h, min);
+
               return (
                 <View key={dateItem.id} style={styles.upcomingCard}>
                   <AppText
@@ -364,6 +462,9 @@ export const VCDatesScreen: React.FC = () => {
                     >
                       "{dateItem.note}"
                     </AppText>
+                  )}
+                  {dateItem.status === "accepted" && (
+                     <LiveCountdown targetDate={targetDate} />
                   )}
 
                   <View style={{ flexDirection: "row", gap: 8, marginTop: 16 }}>
@@ -410,10 +511,26 @@ export const VCDatesScreen: React.FC = () => {
                           variant="outline"
                           size="sm"
                           style={{ flex: 1 }}
-                          onPress={() => handleCancelDate(dateItem.id)}
+                          onPress={() => handleCancelDate(dateItem)}
                         >
                           Cancel
                         </AppButton>
+                        {dateItem.status === "accepted" && (
+                           dateItem.completion_requested_by?.includes(myUserId) ? (
+                              <AppText variant="smallCaps" color={Colors.muted} style={{ alignSelf: 'center', flex: 1, textAlign: 'center' }}>
+                                 Waiting for partner
+                              </AppText>
+                           ) : (
+                              <AppButton
+                                variant="solid"
+                                size="sm"
+                                style={{ flex: 1, backgroundColor: Colors.sage }}
+                                onPress={() => handleCompleteDate(dateItem)}
+                              >
+                                {dateItem.completion_requested_by?.length ? "Confirm Complete" : "Mark Completed"}
+                              </AppButton>
+                           )
+                        )}
                       </>
                     )}
                   </View>
@@ -457,30 +574,39 @@ export const VCDatesScreen: React.FC = () => {
              </AppText>
           ) : (
              past.map((d, i) => (
-                <View key={d.id || i} style={styles.pastCard}>
-                  <View>
-                    <AppText variant="heading" size={15}>
-                      {d.where}
-                    </AppText>
-                    <AppText
-                      variant="mono"
-                      color={Colors.light}
-                      style={{ fontSize: 9, marginTop: 2 }}
-                    >
-                      {new Date(d.date).toLocaleDateString("en-US", { month: "short", day: "numeric" }).toUpperCase()} · {d.status.toUpperCase()}
-                    </AppText>
-                    {d.note && (
-                        <AppText
-                          variant="serifItalic"
-                          size={13}
-                          color={Colors.muted}
-                          style={{ marginTop: 4 }}
-                        >
-                          {d.note}
-                        </AppText>
-                    )}
-                  </View>
-                </View>
+                <Swipeable
+                  key={d.id || i}
+                  renderRightActions={renderRightActions}
+                  onSwipeableOpen={(direction) => {
+                    if (direction === 'right') handleHideDate(d.id);
+                  }}
+                  overshootRight={false}
+                >
+                  <Pressable onPress={() => openCloneSheet(d)} style={({ pressed }) => [styles.pastCard, pressed && { opacity: 0.7 }]}>
+                    <View>
+                      <AppText variant="heading" size={15}>
+                        {d.where}
+                      </AppText>
+                      <AppText
+                        variant="mono"
+                        color={Colors.light}
+                        style={{ fontSize: 9, marginTop: 2 }}
+                      >
+                        {new Date(d.date).toLocaleDateString("en-US", { month: "short", day: "numeric" }).toUpperCase()} · {d.status.toUpperCase()}
+                      </AppText>
+                      {d.note && (
+                          <AppText
+                            variant="serifItalic"
+                            size={13}
+                            color={Colors.muted}
+                            style={{ marginTop: 4 }}
+                          >
+                            {d.note}
+                          </AppText>
+                      )}
+                    </View>
+                  </Pressable>
+                </Swipeable>
              ))
           )}
 
@@ -512,22 +638,48 @@ export const VCDatesScreen: React.FC = () => {
           >
             02 Date
           </AppText>
-          <Pressable
-            style={styles.datePickerRow}
-            onPress={() => setShowDatePicker(true)}
-          >
-            <AppText variant="display" size={20}>
-              {formatDisplayDate(selectedDate)}
-            </AppText>
-            <Ionicons name="calendar-outline" size={26} color="#000" />
-          </Pressable>
-          {showDatePicker && (
-            <DateTimePicker
-              value={selectedDate}
-              mode="date"
-              display="default"
-              onChange={handleDateChange}
-            />
+          {Platform.OS === 'web' ? (
+             <input
+               type="date"
+               value={`${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`}
+               onChange={(e) => {
+                 const val = e.target.value;
+                 if (val) {
+                   const [year, month, day] = val.split("-");
+                   setSelectedDate(new Date(parseInt(year), parseInt(month) - 1, parseInt(day)));
+                 }
+               }}
+               style={{ 
+                  fontSize: 20, 
+                  fontFamily: 'InstrumentSerif_400Regular', 
+                  border: 'none', 
+                  backgroundColor: 'transparent', 
+                  outline: 'none',
+                  paddingBottom: 8,
+                  width: '100%',
+                  color: Colors.ink
+               }}
+             />
+          ) : (
+            <>
+              <Pressable
+                style={styles.datePickerRow}
+                onPress={() => setShowDatePicker(true)}
+              >
+                <AppText variant="display" size={20}>
+                  {formatDisplayDate(selectedDate)}
+                </AppText>
+                <Ionicons name="calendar-outline" size={26} color="#000" />
+              </Pressable>
+              {showDatePicker && (
+                <DateTimePicker
+                  value={selectedDate}
+                  mode="date"
+                  display="default"
+                  onChange={handleDateChange}
+                />
+              )}
+            </>
           )}
         </View>
 
@@ -547,22 +699,50 @@ export const VCDatesScreen: React.FC = () => {
           >
             03 TIME
           </AppText>
-          <Pressable
-            style={styles.datePickerRow}
-            onPress={() => setShowTimePicker(true)}
-          >
-            <AppText variant="display" size={20}>
-              {formatDisplayTime(selectedTime)}
-            </AppText>
-            <Ionicons name="time-outline" size={26} color="#000" />
-          </Pressable>
-          {showTimePicker && (
-            <DateTimePicker
-              value={selectedTime}
-              mode="time"
-              is24Hour={false}
-              onChange={handleTimeChange}
-            />
+          {Platform.OS === 'web' ? (
+             <input
+               type="time"
+               value={selectedTime.toTimeString().slice(0, 5)}
+               onChange={(e) => {
+                 const val = e.target.value;
+                 if (val) {
+                    const [hour, minute] = val.split(":");
+                    const t = new Date();
+                    t.setHours(parseInt(hour), parseInt(minute), 0, 0);
+                    setSelectedTime(t);
+                 }
+               }}
+               style={{ 
+                  fontSize: 20, 
+                  fontFamily: 'InstrumentSerif_400Regular', 
+                  border: 'none', 
+                  backgroundColor: 'transparent', 
+                  outline: 'none',
+                  paddingBottom: 8,
+                  width: '100%',
+                  color: Colors.ink
+               }}
+             />
+          ) : (
+            <>
+              <Pressable
+                style={styles.datePickerRow}
+                onPress={() => setShowTimePicker(true)}
+              >
+                <AppText variant="display" size={20}>
+                  {formatDisplayTime(selectedTime)}
+                </AppText>
+                <Ionicons name="time-outline" size={26} color="#000" />
+              </Pressable>
+              {showTimePicker && (
+                <DateTimePicker
+                  value={selectedTime}
+                  mode="time"
+                  is24Hour={false}
+                  onChange={handleTimeChange}
+                />
+              )}
+            </>
           )}
         </View>
 
@@ -625,6 +805,36 @@ export const VCDatesScreen: React.FC = () => {
           {editingDate ? "Update Date →" : "Propose Date →"}
         </AppButton>
       </BottomSheet>
+
+      <BottomSheet
+        open={!!cancelSheetDate}
+        onClose={() => setCancelSheetDate(null)}
+        kicker="CANCEL DATE"
+        title="Are you sure?"
+      >
+        <AppText style={{ marginBottom: 24, fontSize: 16, color: Colors.ink2, lineHeight: 24 }}>
+          This will cancel the date and notify {partnerName || "your partner"}.
+        </AppText>
+        <View style={{ flexDirection: "row", gap: 12 }}>
+          <AppButton
+            variant="outline"
+            style={{ flex: 1 }}
+            onPress={() => setCancelSheetDate(null)}
+          >
+            Keep It
+          </AppButton>
+          <AppButton
+            variant="solid"
+            style={{ flex: 1, backgroundColor: Colors.accent }}
+            onPress={() => {
+              if (cancelSheetDate) executeCancel(cancelSheetDate);
+              setCancelSheetDate(null);
+            }}
+          >
+            Yes, Cancel
+          </AppButton>
+        </View>
+      </BottomSheet>
     </SafeAreaView>
   );
 };
@@ -683,5 +893,13 @@ const styles = StyleSheet.create({
   radioSelected: {
     backgroundColor: Colors.accent,
     borderColor: Colors.accent,
+  },
+  hideAction: {
+    backgroundColor: '#D9534F',
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: 80,
+    marginBottom: 8,
+    borderRadius: 8,
   },
 });

@@ -31,7 +31,7 @@ const Login = () => {
       const data = await loginUser(email, password);
       await AsyncStorage.setItem('access_token', data.access_token);
       await AsyncStorage.setItem('refresh_token', data.refresh_token);
-      
+
       const returnTo = route.params?.returnTo;
       navigation.navigate('ModeSelector', { autoSelect: returnTo });
     } catch (error: any) {
@@ -64,9 +64,11 @@ const Login = () => {
             n="01"
             value={email}
             onChangeText={(t) => { setEmail(t); setErrorMsg(''); }}
-            placeholder="lou@example.com"
+            placeholder="x1@yopmail.com"
             keyboardType="email-address"
             autoCapitalize="none"
+            autoComplete="email"
+            textContentType="emailAddress"
           />
 
           <View style={{ marginTop: 24 }}>
@@ -77,6 +79,8 @@ const Login = () => {
               onChangeText={(t) => { setPassword(t); setErrorMsg(''); }}
               placeholder="••••••••"
               isPassword
+              autoComplete="password"
+              textContentType="password"
             />
           </View>
         </View>
@@ -90,7 +94,7 @@ const Login = () => {
           <AppButton variant="solid" size="lg" onPress={handleLogin} disabled={loading} style={{ width: '100%', marginBottom: 16 }}>
             {loading ? 'Loading...' : 'Login →'}
           </AppButton>
-          
+
           <Pressable onPress={() => navigation.navigate('ForgotPassword')} style={{ marginBottom: 16, padding: 8 }}>
             <AppText variant="smallCaps" color={Colors.muted} style={{ textAlign: 'center' }}>
               Forgot Password?

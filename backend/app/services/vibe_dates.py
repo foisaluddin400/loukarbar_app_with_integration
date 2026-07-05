@@ -60,7 +60,8 @@ class VibeDateService:
             "status": DateStatus.PENDING,
             "last_updated_by": user_id,
             "created_at": now,
-            "updated_at": now
+            "updated_at": now,
+            "completion_requested_by": []
         })
         
         result = await self.dates.insert_one(date_doc)
@@ -79,7 +80,12 @@ class VibeDateService:
         return await self._map_date(date_doc, payload.timezone)
 
     async def get_dates(self, user_id: str, user_timezone: str = "UTC", page: int = 1, size: int = 20) -> tuple[List[Dict[str, Any]], int]:
-        query = {"$or": [{"proposer_id": user_id}, {"partner_id": user_id}]}
+        query = {
+            "$and": [
+                {"$or": [{"proposer_id": user_id}, {"partner_id": user_id}]},
+                {"hidden_by": {"$ne": user_id}}
+            ]
+        }
         skip = (page - 1) * size
         
         cursor = self.dates.find(query).sort("updated_at", -1).skip(skip).limit(size)
@@ -93,9 +99,18 @@ class VibeDateService:
         query = {
             "$or": [{"proposer_id": user_id}, {"partner_id": user_id}],
             "status": {"$in": [DateStatus.PENDING, DateStatus.PROPOSED_CHANGES]},
-            "last_updated_by": {"$ne": user_id}
+            "last_updated_by": {"$ne": user_id},
+            "seen_by": {"$ne": user_id}
         }
         return await self.dates.count_documents(query)
+
+    async def mark_dates_seen(self, user_id: str) -> None:
+        query = {
+            "$or": [{"proposer_id": user_id}, {"partner_id": user_id}],
+            "status": {"$in": [DateStatus.PENDING, DateStatus.PROPOSED_CHANGES]},
+            "last_updated_by": {"$ne": user_id}
+        }
+        await self.dates.update_many(query, {"$addToSet": {"seen_by": user_id}})
 
     async def get_date_by_id(self, date_id: str, user_id: str, user_timezone: str = "UTC") -> Dict[str, Any]:
         doc = await self.dates.find_one({"_id": ObjectId(date_id)})
@@ -134,7 +149,8 @@ class VibeDateService:
         updates.update({
             "status": new_status,
             "last_updated_by": user_id,
-            "updated_at": now
+            "updated_at": now,
+            "seen_by": []
         })
         
         await self.dates.update_one({"_id": ObjectId(date_id)}, {"$set": updates})
@@ -158,7 +174,8 @@ class VibeDateService:
                     {"$set": {
                         "status": DateStatus.ACCEPTED,
                         "updated_at": now,
-                        "last_updated_by": user_id
+                        "last_updated_by": user_id,
+                        "seen_by": []
                     }}
                 )
                 
@@ -206,7 +223,8 @@ class VibeDateService:
             updates.update({
                 "status": DateStatus.PROPOSED_CHANGES,
                 "last_updated_by": user_id,
-                "updated_at": now
+                "updated_at": now,
+                "seen_by": []
             })
             
             await self.dates.update_one({"_id": ObjectId(date_id)}, {"$set": updates})
@@ -225,10 +243,94 @@ class VibeDateService:
 
     async def delete_date(self, user_id: str, date_id: str) -> bool:
         date_doc = await self.get_date_by_id(date_id, user_id)
-        # Allow either party to delete/cancel? 
-        # Usually only the proposer can fully delete, or partner can reject.
-        # Let's allow either to delete for simplicity of CRUD.
         result = await self.dates.delete_one({"_id": ObjectId(date_id)})
         return result.deleted_count > 0
+
+    async def cancel_date(self, user_id: str, date_id: str) -> bool:
+        date_doc = await self.get_date_by_id(date_id, user_id)
+        me = await vibe_check_service.get_profile(user_id)
+        now = datetime.now(timezone.utc)
+        
+        if date_doc["status"] == DateStatus.ACCEPTED:
+            await self.dates.update_one(
+                {"_id": ObjectId(date_id)},
+                {"$set": {
+                    "status": DateStatus.CANCELLED,
+                    "updated_at": now,
+                    "last_updated_by": user_id
+                }}
+            )
+            # Notify the partner
+            is_partner = date_doc["partner_id"] == user_id
+            recipient_id = date_doc["proposer_id"] if is_partner else date_doc["partner_id"]
+            await notification_service.schedule_notification(user_id, NotificationCreate(
+                recipient_id=recipient_id,
+                type=NotificationType.VIBE_DATE,
+                title="Date Cancelled",
+                message=f"{me['name']} had to cancel the upcoming date at {date_doc['where']}.",
+                scheduled_for=now,
+                timezone=date_doc["timezone"]
+            ))
+            return True
+        return False
+
+    async def complete_date(self, user_id: str, date_id: str) -> bool:
+        date_doc = await self.get_date_by_id(date_id, user_id)
+        me = await vibe_check_service.get_profile(user_id)
+        now = datetime.now(timezone.utc)
+        
+        if date_doc["status"] == DateStatus.ACCEPTED:
+            req_by = date_doc.get("completion_requested_by", [])
+            if user_id not in req_by:
+                req_by.append(user_id)
+                
+            is_partner = date_doc["partner_id"] == user_id
+            recipient_id = date_doc["proposer_id"] if is_partner else date_doc["partner_id"]
+
+            if date_doc["proposer_id"] in req_by and date_doc["partner_id"] in req_by:
+                await self.dates.update_one(
+                    {"_id": ObjectId(date_id)},
+                    {"$set": {
+                        "status": DateStatus.COMPLETED,
+                        "updated_at": now,
+                        "last_updated_by": user_id,
+                        "completion_requested_by": req_by
+                    }}
+                )
+                await notification_service.schedule_notification(user_id, NotificationCreate(
+                    recipient_id=recipient_id,
+                    type=NotificationType.VIBE_DATE,
+                    title="Date Completed",
+                    message=f"{me['name']} also marked the date at {date_doc['where']} as completed. It's now officially completed!",
+                    scheduled_for=now,
+                    timezone=date_doc["timezone"]
+                ))
+            else:
+                await self.dates.update_one(
+                    {"_id": ObjectId(date_id)},
+                    {"$set": {
+                        "updated_at": now,
+                        "last_updated_by": user_id,
+                        "completion_requested_by": req_by
+                    }}
+                )
+                await notification_service.schedule_notification(user_id, NotificationCreate(
+                    recipient_id=recipient_id,
+                    type=NotificationType.VIBE_DATE,
+                    title="Completion Requested",
+                    message=f"{me['name']} marked the date at {date_doc['where']} as completed. Please confirm to move it to history.",
+                    scheduled_for=now,
+                    timezone=date_doc["timezone"]
+                ))
+            return True
+        return False
+
+    async def hide_date(self, user_id: str, date_id: str) -> bool:
+        date_doc = await self.get_date_by_id(date_id, user_id)
+        await self.dates.update_one(
+            {"_id": ObjectId(date_id)},
+            {"$addToSet": {"hidden_by": user_id}}
+        )
+        return True
 
 vibe_date_service = VibeDateService()

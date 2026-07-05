@@ -37,7 +37,11 @@ export function VibeTabs() {
   useEffect(() => {
     fetchPendingDates();
     const sub = DeviceEventEmitter.addListener('REFRESH_VIBE_DATA', fetchPendingDates);
-    return () => sub.remove();
+    const subClear = DeviceEventEmitter.addListener('CLEAR_DATES_BADGE', () => setPendingDatesCount(0));
+    return () => {
+      sub.remove();
+      subClear.remove();
+    };
   }, []);
 
   return (
