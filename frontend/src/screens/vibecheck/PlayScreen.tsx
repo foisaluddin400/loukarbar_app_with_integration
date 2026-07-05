@@ -18,6 +18,7 @@ import {
   VibeTabParamList,
 } from "../../types";
 import SamVibeNav, { LiveCountdownNav } from "@/components/ui/SamVibeNav";
+import { VibeRefreshControl } from "../../components/ui/VibeRefreshControl";
 import { listVibeDates } from "../../services/vibeDatesApi";
 import { useNavigation } from "@react-navigation/native";
 import { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
@@ -427,11 +428,11 @@ export const PlayScreen: React.FC = () => {
 
   return (
     <SafeAreaView style={styles.safe}>
-      <ScrollView 
+      <VibeRefreshControl 
         showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.accent} />
-        }
+        refreshing={refreshing} 
+        onRefresh={onRefresh}
+        iconMark="◐"
       >
         <SamVibeNav 
           onPartnerChange={(newPartnerId) => {
@@ -920,7 +921,7 @@ export const PlayScreen: React.FC = () => {
 
           <View style={{ height: 80 }} />
         </View>
-      </ScrollView>
+      </VibeRefreshControl>
 
       {/* Partner Selector Sheet */}
       <BottomSheet

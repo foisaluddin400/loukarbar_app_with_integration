@@ -33,7 +33,11 @@ import {
   markDatesSeen,
   completeVibeDate,
   hideVibeDate,
+  deleteVibeDateForMe,
 } from "../../services/vibeDatesApi";
+
+import { VCHiddenDatesBottomSheet } from "./VCHiddenDatesBottomSheet";
+import { VibeRefreshControl } from "../../components/ui/VibeRefreshControl";
 
 const getTimezone = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
 
@@ -92,6 +96,7 @@ export const VCDatesScreen: React.FC = () => {
   const [sheet, setSheet] = useState(false);
   const [cancelSheetDate, setCancelSheetDate] = useState<any>(null);
   const [editingDate, setEditingDate] = useState<any | null>(null);
+  const [showHiddenSheet, setShowHiddenSheet] = useState(false);
 
   // Form States
   const [place, setPlace] = useState("");
@@ -147,7 +152,6 @@ export const VCDatesScreen: React.FC = () => {
       
       // Mark dates as seen so the badge clears when user views this screen
       await markDatesSeen().catch(() => null);
-      DeviceEventEmitter.emit("REFRESH_VIBE_DATA");
     } catch (e) {
       console.error(e);
     } finally {
@@ -341,10 +345,28 @@ export const VCDatesScreen: React.FC = () => {
     }
   };
 
+  const handleDeleteForMe = async (dateId: string) => {
+    setDates((prev) => prev.filter((d) => d.id !== dateId));
+    try {
+      await deleteVibeDateForMe(dateId);
+      DeviceEventEmitter.emit("REFRESH_VIBE_DATA");
+    } catch (e: any) {
+      Alert.alert("Error", "Failed to delete date.");
+      fetchData(); 
+    }
+  };
+
   const renderRightActions = () => (
-    <View style={styles.hideAction}>
-      <Ionicons name="eye-off-outline" size={24} color={Colors.surface} />
-      <AppText color={Colors.surface} variant="mono" style={{ fontSize: 10, marginTop: 4 }}>HIDE</AppText>
+    <View style={[styles.hideActionContainer, { alignItems: 'flex-end', paddingRight: 24, flex: 1 }]}>
+      <Ionicons name="eye-off-outline" size={20} color={Colors.muted} />
+      <AppText color={Colors.muted} variant="mono" style={{ fontSize: 10, marginTop: 4, letterSpacing: 1 }}>HIDE</AppText>
+    </View>
+  );
+
+  const renderLeftActions = () => (
+    <View style={[styles.hideActionContainer, { alignItems: 'flex-start', paddingLeft: 24, flex: 1 }]}>
+      <Ionicons name="trash-outline" size={20} color={'#D9534F'} />
+      <AppText color={'#D9534F'} variant="mono" style={{ fontSize: 10, marginTop: 4, letterSpacing: 1 }}>DELETE</AppText>
     </View>
   );
 
@@ -364,11 +386,10 @@ export const VCDatesScreen: React.FC = () => {
   return (
     <SafeAreaView style={styles.safe}>
       <SamVibeNav onPartnerChange={handlePartnerChange} />
-      <ScrollView 
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.accent} />
-        }
+      <VibeRefreshControl 
+        refreshing={refreshing} 
+        onRefresh={onRefresh}
+        iconMark="◇"
       >
         <View style={styles.inner}>
           <AppText
@@ -574,45 +595,65 @@ export const VCDatesScreen: React.FC = () => {
              </AppText>
           ) : (
              past.map((d, i) => (
-                <Swipeable
-                  key={d.id || i}
-                  renderRightActions={renderRightActions}
-                  onSwipeableOpen={(direction) => {
-                    if (direction === 'right') handleHideDate(d.id);
-                  }}
-                  overshootRight={false}
-                >
-                  <Pressable onPress={() => openCloneSheet(d)} style={({ pressed }) => [styles.pastCard, pressed && { opacity: 0.7 }]}>
-                    <View>
-                      <AppText variant="heading" size={15}>
-                        {d.where}
-                      </AppText>
-                      <AppText
-                        variant="mono"
-                        color={Colors.light}
-                        style={{ fontSize: 9, marginTop: 2 }}
-                      >
-                        {new Date(d.date).toLocaleDateString("en-US", { month: "short", day: "numeric" }).toUpperCase()} · {d.status.toUpperCase()}
-                      </AppText>
-                      {d.note && (
-                          <AppText
-                            variant="serifItalic"
-                            size={13}
-                            color={Colors.muted}
-                            style={{ marginTop: 4 }}
-                          >
-                            {d.note}
-                          </AppText>
-                      )}
-                    </View>
-                  </Pressable>
-                </Swipeable>
+                <View key={d.id || i} style={{ marginBottom: 10 }}>
+                  <Swipeable
+                    renderRightActions={renderRightActions}
+                    renderLeftActions={renderLeftActions}
+                    onSwipeableOpen={(direction) => {
+                      if (direction === 'right') handleHideDate(d.id);
+                      if (direction === 'left') handleDeleteForMe(d.id);
+                    }}
+                    overshootRight={true}
+                    overshootLeft={true}
+                    friction={1.5}
+                  >
+                    <Pressable onPress={() => openCloneSheet(d)} style={({ pressed }) => [styles.pastCard, pressed && { opacity: 0.7 }]}>
+                      <View>
+                        <AppText variant="heading" size={15}>
+                          {d.where}
+                        </AppText>
+                        <AppText
+                          variant="mono"
+                          color={Colors.light}
+                          style={{ fontSize: 9, marginTop: 2 }}
+                        >
+                          {new Date(d.date).toLocaleDateString("en-US", { month: "short", day: "numeric" }).toUpperCase()} · {d.status.toUpperCase()}
+                        </AppText>
+                        {d.note && (
+                            <AppText
+                              variant="serifItalic"
+                              size={13}
+                              color={Colors.muted}
+                              style={{ marginTop: 4 }}
+                            >
+                              {d.note}
+                            </AppText>
+                        )}
+                      </View>
+                    </Pressable>
+                  </Swipeable>
+                </View>
              ))
           )}
 
+          <AppButton
+            variant="outline"
+            size="sm"
+            style={{ marginTop: 24, alignSelf: 'center', borderColor: Colors.rule }}
+            onPress={() => setShowHiddenSheet(true)}
+          >
+            <AppText color={Colors.muted} variant="smallCaps" size={12}>View Hidden History</AppText>
+          </AppButton>
+
           <View style={{ height: 80 }} />
         </View>
-      </ScrollView>
+      </VibeRefreshControl>
+
+      {/* Hidden Dates BottomSheet */}
+      <VCHiddenDatesBottomSheet
+        open={showHiddenSheet}
+        onClose={() => setShowHiddenSheet(false)}
+      />
 
       {/* Plan / Edit Date BottomSheet */}
       <BottomSheet
@@ -859,7 +900,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.rule,
     padding: 14,
-    marginBottom: 10,
     gap: 12,
   },
   datePickerRow: {
@@ -894,12 +934,9 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.accent,
     borderColor: Colors.accent,
   },
-  hideAction: {
-    backgroundColor: '#D9534F',
+  hideActionContainer: {
     justifyContent: 'center',
-    alignItems: 'center',
-    width: 80,
-    marginBottom: 8,
-    borderRadius: 8,
+    height: '100%',
+    flex: 1,
   },
 });

@@ -83,7 +83,8 @@ class VibeDateService:
         query = {
             "$and": [
                 {"$or": [{"proposer_id": user_id}, {"partner_id": user_id}]},
-                {"hidden_by": {"$ne": user_id}}
+                {"hidden_by": {"$ne": user_id}},
+                {"deleted_by": {"$ne": user_id}}
             ]
         }
         skip = (page - 1) * size
@@ -100,7 +101,8 @@ class VibeDateService:
             "$or": [{"proposer_id": user_id}, {"partner_id": user_id}],
             "status": {"$in": [DateStatus.PENDING, DateStatus.PROPOSED_CHANGES]},
             "last_updated_by": {"$ne": user_id},
-            "seen_by": {"$ne": user_id}
+            "seen_by": {"$ne": user_id},
+            "deleted_by": {"$ne": user_id}
         }
         return await self.dates.count_documents(query)
 
@@ -330,6 +332,39 @@ class VibeDateService:
         await self.dates.update_one(
             {"_id": ObjectId(date_id)},
             {"$addToSet": {"hidden_by": user_id}}
+        )
+        return True
+
+    async def unhide_date(self, user_id: str, date_id: str) -> bool:
+        date_doc = await self.get_date_by_id(date_id, user_id)
+        await self.dates.update_one(
+            {"_id": ObjectId(date_id)},
+            {"$pull": {"hidden_by": user_id}}
+        )
+        return True
+
+    async def get_hidden_dates(self, user_id: str, user_timezone: str = "UTC", page: int = 1, size: int = 20) -> tuple[List[Dict[str, Any]], int]:
+        query = {
+            "$and": [
+                {"$or": [{"proposer_id": user_id}, {"partner_id": user_id}]},
+                {"hidden_by": user_id},
+                {"deleted_by": {"$ne": user_id}}
+            ]
+        }
+        skip = (page - 1) * size
+        
+        cursor = self.dates.find(query).sort("updated_at", -1).skip(skip).limit(size)
+        docs = await cursor.to_list(length=None)
+        total = await self.dates.count_documents(query)
+        
+        results = [await self._map_date(d, user_timezone) for d in docs]
+        return results, total
+
+    async def delete_date_for_me(self, user_id: str, date_id: str) -> bool:
+        date_doc = await self.get_date_by_id(date_id, user_id)
+        await self.dates.update_one(
+            {"_id": ObjectId(date_id)},
+            {"$addToSet": {"deleted_by": user_id}}
         )
         return True
 

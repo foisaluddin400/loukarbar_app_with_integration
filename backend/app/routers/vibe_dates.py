@@ -40,6 +40,27 @@ async def list_vibe_dates(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/hidden", response_model=VibeDateListResponse)
+async def list_hidden_vibe_dates(
+    page: int = Query(1, ge=1),
+    size: int = Query(20, ge=1, le=100),
+    timezone: str = Query("UTC"),
+    current_user: dict = Depends(get_current_user)
+):
+    """List all hidden date proposals with pagination."""
+    try:
+        dates, total = await vibe_date_service.get_hidden_dates(current_user["id"], timezone, page, size)
+        return {
+            "success": True, 
+            "data": dates, 
+            "total": total,
+            "page": page,
+            "size": size,
+            "timezone": timezone
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/pending-count")
 async def get_pending_dates_count(current_user: dict = Depends(get_current_user)):
     """Get the count of dates that require the user's attention."""
@@ -141,6 +162,32 @@ async def hide_vibe_date(date_id: str, current_user: dict = Depends(get_current_
         if not success:
              raise HTTPException(status_code=400, detail="Cannot hide this date.")
         return {"success": True, "message": "Date hidden."}
+    except PermissionError as pe:
+        raise HTTPException(status_code=403, detail=str(pe))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/{date_id}/unhide")
+async def unhide_vibe_date(date_id: str, current_user: dict = Depends(get_current_user)):
+    """Unhide a date proposal to show it again in history."""
+    try:
+        success = await vibe_date_service.unhide_date(current_user["id"], date_id)
+        if not success:
+             raise HTTPException(status_code=400, detail="Cannot unhide this date.")
+        return {"success": True, "message": "Date unhidden."}
+    except PermissionError as pe:
+        raise HTTPException(status_code=403, detail=str(pe))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/{date_id}/delete-for-me")
+async def delete_vibe_date_for_me(date_id: str, current_user: dict = Depends(get_current_user)):
+    """Delete a date proposal from the current user's view permanently."""
+    try:
+        success = await vibe_date_service.delete_date_for_me(current_user["id"], date_id)
+        if not success:
+             raise HTTPException(status_code=400, detail="Cannot delete this date.")
+        return {"success": True, "message": "Date deleted."}
     except PermissionError as pe:
         raise HTTPException(status_code=403, detail=str(pe))
     except Exception as e:

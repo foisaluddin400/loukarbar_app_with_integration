@@ -8,6 +8,7 @@ import { AppTextInput } from '../../components/ui/AppTextInput';
 import { BottomSheet } from '../../components/ui/BottomSheet';
 import { LadderRow } from '../../components/vibecheck/LadderRow';
 import SamVibeNav from '@/components/ui/SamVibeNav';
+import { VibeRefreshControl } from '../../components/ui/VibeRefreshControl';
 import { getVibeProfile } from '../../services/vibeCheckApi';
 import { setVibePulse, getVibePulseStatus, getPulseAnalytics, getMyFlags, createFlag, checkAlignedConnection, updateFlag, deleteFlag, getPartnerFlags, breakAlignment } from '../../services/vibePulseApi';
 
@@ -61,6 +62,15 @@ export const PulseScreen: React.FC = () => {
   const [newFlagColor, setNewFlagColor] = useState<'Green' | 'Yellow' | 'Red'>('Green');
   const [newFlagType, setNewFlagType] = useState<'private' | 'public'>('private');
   const [submittingFlag, setSubmittingFlag] = useState(false);
+
+  const [refreshing, setRefreshing] = useState(false);
+  const onRefresh = React.useCallback(async () => {
+    setRefreshing(true);
+    if (partnerId) {
+      await loadPulseData(partnerId);
+    }
+    setRefreshing(false);
+  }, [partnerId]);
 
   const [confirmAlignedSheet, setConfirmAlignedSheet] = useState(false);
   const [alignedTargetIndex, setAlignedTargetIndex] = useState(-1);
@@ -284,7 +294,7 @@ export const PulseScreen: React.FC = () => {
   if (section === 'ladder') {
     return (
       <SafeAreaView style={styles.safe}>
-        <ScrollView showsVerticalScrollIndicator={false}>
+        <VibeRefreshControl refreshing={refreshing} onRefresh={onRefresh} iconMark="✦" showsVerticalScrollIndicator={false}>
           <View style={styles.inner}>
             <Pressable onPress={() => setSection('overview')} style={{ marginBottom: 16 }}>
               <AppText variant="mono" color={Colors.accent} style={{ fontSize: 10 }}>← BACK TO PULSE</AppText>
@@ -348,7 +358,7 @@ export const PulseScreen: React.FC = () => {
 
             <View style={{ height: 80 }} />
           </View>
-        </ScrollView>
+        </VibeRefreshControl>
 
         {/* Aligned Confirmation Sheet */}
         <BottomSheet
@@ -408,7 +418,7 @@ export const PulseScreen: React.FC = () => {
   if (section === 'patterns') {
     return (
       <SafeAreaView style={styles.safe}>
-        <ScrollView showsVerticalScrollIndicator={false}>
+        <VibeRefreshControl refreshing={refreshing} onRefresh={onRefresh} iconMark="✦" showsVerticalScrollIndicator={false}>
           <View style={styles.inner}>
             <Pressable onPress={() => setSection('overview')} style={{ marginBottom: 16 }}>
               <AppText variant="mono" color={Colors.accent} style={{ fontSize: 10 }}>← BACK TO PULSE</AppText>
@@ -533,7 +543,7 @@ export const PulseScreen: React.FC = () => {
 
             <View style={{ height: 80 }} />
           </View>
-        </ScrollView>
+        </VibeRefreshControl>
       </SafeAreaView>
     );
   }
@@ -545,7 +555,7 @@ export const PulseScreen: React.FC = () => {
 
     return (
       <SafeAreaView style={styles.safe}>
-        <ScrollView showsVerticalScrollIndicator={false}>
+        <VibeRefreshControl refreshing={refreshing} onRefresh={onRefresh} iconMark="✦" showsVerticalScrollIndicator={false}>
           <View style={styles.inner}>
             <Pressable onPress={() => setSection('overview')} style={{ marginBottom: 16 }}>
               <AppText variant="mono" color={Colors.accent} style={{ fontSize: 10 }}>← BACK TO PULSE</AppText>
@@ -612,7 +622,7 @@ export const PulseScreen: React.FC = () => {
 
             <View style={{ height: 80 }} />
           </View>
-        </ScrollView>
+        </VibeRefreshControl>
 
       {/* New Flag Sheet */}
       <BottomSheet
@@ -734,7 +744,7 @@ export const PulseScreen: React.FC = () => {
   return (
     <SafeAreaView style={styles.safe}>
       <SamVibeNav onPartnerChange={(pid) => setPartnerId(pid)} />
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <VibeRefreshControl refreshing={refreshing} onRefresh={onRefresh} iconMark="✦" showsVerticalScrollIndicator={false}>
         <View style={styles.inner}>
           <AppText variant="display" size={42} style={{ lineHeight: 42, marginBottom: 6 }}>
             The Pulse<AppText size={42} color={Colors.accent}>.</AppText>
@@ -781,7 +791,7 @@ export const PulseScreen: React.FC = () => {
 
           <View style={{ height: 80 }} />
         </View>
-      </ScrollView>
+      </VibeRefreshControl>
     </SafeAreaView>
   );
 };

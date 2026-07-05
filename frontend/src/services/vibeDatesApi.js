@@ -49,3 +49,19 @@ export const hideVibeDate = async (dateId) => {
   const response = await api.post(`/vibedates/${dateId}/hide`);
   return response.data;
 };
+
+export const unhideVibeDate = async (dateId) => {
+  const response = await api.post(`/vibedates/${dateId}/unhide`);
+  return response.data;
+};
+
+export const listHiddenVibeDates = async (page = 1, size = 20, timezone = 'UTC') => {
+  const params = new URLSearchParams({ page, size, timezone });
+  const response = await api.get(`/vibedates/hidden?${params.toString()}`);
+  return response.data;
+};
+
+export const deleteVibeDateForMe = async (dateId) => {
+  const response = await api.post(`/vibedates/${dateId}/delete-for-me`);
+  return response.data;
+};

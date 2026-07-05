@@ -151,9 +151,9 @@ const SamVibeNav: React.FC<SamVibeNavProps> = ({ onPartnerChange }) => {
 
   useEffect(() => {
     fetchData();
-    DeviceEventEmitter.addListener("REFRESH_VIBE_DATA", fetchData);
+    const sub = DeviceEventEmitter.addListener("REFRESH_VIBE_DATA", fetchData);
     return () => {
-      DeviceEventEmitter.removeAllListeners("REFRESH_VIBE_DATA");
+      sub.remove();
     };
   }, [fetchData]);
 

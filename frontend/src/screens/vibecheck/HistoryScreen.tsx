@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, StyleSheet, ActivityIndicator, TextInput, FlatList, RefreshControl } from 'react-native';
+import { View, StyleSheet, ActivityIndicator, TextInput, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors } from '../../constants/colors';
 import { AppText } from '../../components/ui/AppText';
 import { Tag } from '../../components/ui/Tag';
 import SamVibeNav from '@/components/ui/SamVibeNav';
+import { VibeFlatList } from '../../components/ui/VibeRefreshControl';
 import { Feather } from '@expo/vector-icons';
 
 import { getVibeCardHistory } from '../../services/vibeCheckApi';
@@ -164,18 +165,18 @@ export const HistoryScreen: React.FC = () => {
     <SafeAreaView style={styles.safe}>
       <SamVibeNav onPartnerChange={(pid) => setPartnerId(pid)} />
       
-      <FlatList
+      <VibeFlatList
         data={history}
-        keyExtractor={(_, i) => i.toString()}
+        keyExtractor={(item: any, i: number) => i.toString()}
         renderItem={renderCard}
         ListHeaderComponent={renderHeader()}
         contentContainerStyle={{ paddingBottom: 80 }}
         showsVerticalScrollIndicator={false}
         onEndReached={handleLoadMore}
         onEndReachedThreshold={0.5}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.accent} colors={[Colors.accent]} />
-        }
+        refreshing={refreshing}
+        onRefresh={onRefresh}
+        iconMark="◈"
         ListFooterComponent={loadingMore ? <ActivityIndicator color={Colors.accent} style={{ padding: 20 }} /> : null}
       />
     </SafeAreaView>

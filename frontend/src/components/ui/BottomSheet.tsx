@@ -4,10 +4,10 @@ import {
   View,
   Pressable,
   StyleSheet,
-  ScrollView,
   Dimensions,
   Platform,
 } from "react-native";
+import { GestureHandlerRootView, ScrollView } from "react-native-gesture-handler";
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -69,7 +69,8 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
       onRequestClose={onClose}
       statusBarTranslucent
     >
-      <View style={styles.overlay}>
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <View style={styles.overlay}>
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
 
         <Animated.View
@@ -128,6 +129,7 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
           </ScrollView>
         </Animated.View>
       </View>
+      </GestureHandlerRootView>
     </Modal>
   );
 };
