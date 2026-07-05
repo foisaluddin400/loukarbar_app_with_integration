@@ -31,8 +31,8 @@ async def list_my_notifications(
     current_user: dict = Depends(get_current_user)
 ):
     """List notifications received by the current user."""
-    data, total = await notification_service.get_my_notifications(current_user["id"], page, size, timezone)
-    return NotificationPaginatedResponse(success=True, data=data, total=total, page=page, size=size)
+    data, total, unread_count = await notification_service.get_my_notifications(current_user["id"], page, size, timezone)
+    return NotificationPaginatedResponse(success=True, data=data, total=total, unread_count=unread_count, page=page, size=size)
 
 @router.patch("/{notification_id}/seen", response_model=GenericResponse)
 async def mark_notification_seen(notification_id: str, current_user: dict = Depends(get_current_user)):
@@ -41,6 +41,14 @@ async def mark_notification_seen(notification_id: str, current_user: dict = Depe
     if not success:
         raise HTTPException(status_code=404, detail="Notification not found.")
     return GenericResponse(success=True, message="Notification marked as seen.")
+
+@router.patch("/{notification_id}/unread", response_model=GenericResponse)
+async def mark_notification_unread(notification_id: str, current_user: dict = Depends(get_current_user)):
+    """Mark a notification as unread."""
+    success = await notification_service.mark_as_unread(notification_id, current_user["id"])
+    if not success:
+        raise HTTPException(status_code=404, detail="Notification not found or already unread.")
+    return GenericResponse(success=True, message="Notification marked as unread.")
 
 @router.delete("/", response_model=GenericResponse)
 async def clear_all_notifications(current_user: dict = Depends(get_current_user)):

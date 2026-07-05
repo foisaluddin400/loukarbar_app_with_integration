@@ -48,7 +48,7 @@ class NotificationService:
         
         return await self._map_notification(new_doc, payload.timezone)
 
-    async def get_my_notifications(self, user_id: str, page: int = 1, size: int = 20, user_timezone: str = "UTC") -> Tuple[List[Dict[str, Any]], int]:
+    async def get_my_notifications(self, user_id: str, page: int = 1, size: int = 20, user_timezone: str = "UTC") -> Tuple[List[Dict[str, Any]], int, int]:
         query = {"recipient_id": user_id}
         
         # Auto-mark delivered if scheduled time has passed
@@ -62,13 +62,28 @@ class NotificationService:
         cursor = self.notifications_collection.find(query).sort("scheduled_for", -1).skip(skip).limit(size)
         docs = await cursor.to_list(length=None)
         total = await self.notifications_collection.count_documents(query)
+        unread_count = await self.notifications_collection.count_documents({"recipient_id": user_id, "status": {"$ne": NotificationStatus.SEEN}})
 
-        return [await self._map_notification(d, user_timezone) for d in docs], total
+        return [await self._map_notification(d, user_timezone) for d in docs], total, unread_count
 
     async def mark_as_seen(self, notification_id: str, user_id: str) -> bool:
+        now_utc = datetime.now(timezone.utc)
         result = await self.notifications_collection.update_one(
             {"_id": ObjectId(notification_id), "recipient_id": user_id},
-            {"$set": {"status": NotificationStatus.SEEN}}
+            {"$set": {"status": NotificationStatus.SEEN, "seen_at": now_utc}}
+        )
+        if result.modified_count > 0:
+            await self.users.update_one(
+                {"_id": ObjectId(user_id)},
+                {"$set": {"last_active_at": now_utc}}
+            )
+            return True
+        return False
+
+    async def mark_as_unread(self, notification_id: str, user_id: str) -> bool:
+        result = await self.notifications_collection.update_one(
+            {"_id": ObjectId(notification_id), "recipient_id": user_id},
+            {"$set": {"status": NotificationStatus.DELIVERED}, "$unset": {"seen_at": ""}}
         )
         return result.modified_count > 0
 
@@ -93,7 +108,7 @@ class NotificationService:
         except Exception:
             tz = zoneinfo.ZoneInfo("UTC")
 
-        for field in ["scheduled_for", "created_at", "delivered_at"]:
+        for field in ["scheduled_for", "created_at", "delivered_at", "seen_at"]:
             dt = d.get(field)
             if isinstance(dt, datetime):
                 if dt.tzinfo is None: dt = dt.replace(tzinfo=timezone.utc)

@@ -1,6 +1,6 @@
 import { SafeAreaView } from 'react-native-safe-area-context';
 import React, { useState } from 'react';
-import { View, StyleSheet, ScrollView, Alert, Pressable } from 'react-native';
+import { View, StyleSheet, ScrollView, Alert, Pressable, KeyboardAvoidingView, Platform } from 'react-native';
 import { useNavigation, NavigationProp, useRoute, RouteProp } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors } from '../constants/colors';
@@ -47,7 +47,11 @@ const Login = () => {
 
   return (
     <SafeAreaView style={styles.safe}>
-      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={{ flex: 1 }}
+      >
+        <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
         <View style={styles.content}>
           <AppText variant="smallCaps" color={Colors.accent} style={{ marginBottom: 14 }}>
             WELCOME BACK
@@ -69,6 +73,7 @@ const Login = () => {
             autoCapitalize="none"
             autoComplete="email"
             textContentType="emailAddress"
+            returnKeyType="next"
           />
 
           <View style={{ marginTop: 24 }}>
@@ -81,6 +86,8 @@ const Login = () => {
               isPassword
               autoComplete="password"
               textContentType="password"
+              returnKeyType="go"
+              onSubmitEditing={handleLogin}
             />
           </View>
         </View>
@@ -108,6 +115,7 @@ const Login = () => {
           </Pressable>
         </View>
       </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 };

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, Pressable, Image, Alert } from 'react-native';
+import { View, StyleSheet, Pressable, Image, Alert, PanResponder } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors } from '../../constants/colors';
 import { AppText } from '../../components/ui/AppText';
@@ -11,6 +11,7 @@ import { AppButton } from './AppButton';
 import { updateUserName, uploadProfilePhoto, breakAlignment, deleteAccount } from '../../services/userApi';
 import * as ImagePicker from 'expo-image-picker';
 import { useNavigation } from '@react-navigation/native';
+import { useModeSwitcher } from '../../hooks/useModeSwitcher';
 
 const AlignedNav: React.FC = () => {
   const [user, setUser] = useState<any>(null);
@@ -25,6 +26,21 @@ const AlignedNav: React.FC = () => {
   const [deletePassword, setDeletePassword] = useState("");
 
   const navigation = useNavigation<any>();
+  const { switchToVibeCheck } = useModeSwitcher();
+
+  const panResponder = React.useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_, gestureState) => {
+        return Math.abs(gestureState.dy) > 10 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx);
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dy > 30 || gestureState.dy < -30) {
+          switchToVibeCheck();
+        }
+      },
+    })
+  ).current;
 
   const fetchPhotoBlob = async (userId: string, currentToken: string) => {
     try {
@@ -149,23 +165,25 @@ const AlignedNav: React.FC = () => {
         aligned.
       </AppText>
 
-      <Pressable style={styles.partnerContainer} onPress={() => setIsProfileOpen(true)}>
-        <AppText variant="smallCaps" style={styles.partnerName}>
-          {user && user.name ? user.name.toUpperCase() : 'USER'}
-        </AppText>
-        <View style={styles.avatar}>
-          {user && user.profile_photo_url && photoBlobUrl ? (
-            <Image 
-              source={{ uri: photoBlobUrl }} 
-              style={{ width: 32, height: 32, borderRadius: 16 }}
-            />
-          ) : (
-            <AppText style={styles.avatarText}>
-              {user && user.name ? user.name[0].toUpperCase() : 'U'}
-            </AppText>
-          )}
-        </View>
-      </Pressable>
+      <View {...panResponder.panHandlers}>
+        <Pressable style={styles.partnerContainer} onPress={() => setIsProfileOpen(true)}>
+          <AppText variant="smallCaps" style={styles.partnerName}>
+            {user && user.name ? user.name.toUpperCase() : 'USER'}
+          </AppText>
+          <View style={styles.avatar}>
+            {user && user.profile_photo_url && photoBlobUrl ? (
+              <Image 
+                source={{ uri: photoBlobUrl }} 
+                style={{ width: 32, height: 32, borderRadius: 16 }}
+              />
+            ) : (
+              <AppText style={styles.avatarText}>
+                {user && user.name ? user.name[0].toUpperCase() : 'U'}
+              </AppText>
+            )}
+          </View>
+        </Pressable>
+      </View>
 
       <BottomSheet
         open={isProfileOpen}
@@ -213,6 +231,15 @@ const AlignedNav: React.FC = () => {
           >
             {isSaving ? "Saving..." : "Save Profile →"}
           </AppButton>
+          
+          <Pressable style={styles.blackCard} onPress={() => { setIsProfileOpen(false); switchToVibeCheck(); }}>
+            <AppText variant="heading" size={17} color="#fff">
+              Flip to vibe check.
+            </AppText>
+            <AppText variant="mono" color="#ccc">
+              The other side — for figuring it out
+            </AppText>
+          </Pressable>
           
           <View style={styles.actionButtons}>
             <Pressable onPress={handleLogout} style={styles.actionBtn}>
@@ -346,6 +373,13 @@ const styles = StyleSheet.create({
     paddingTop: 20,
     borderTopWidth: 1,
     borderTopColor: Colors.rule,
+    alignItems: 'center',
+  },
+  blackCard: {
+    backgroundColor: '#1C1C1E',
+    borderRadius: 14,
+    padding: 20,
+    marginTop: 16,
   },
   actionBtn: {
     paddingVertical: 5,

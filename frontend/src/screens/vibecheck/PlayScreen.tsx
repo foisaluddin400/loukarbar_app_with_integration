@@ -428,18 +428,18 @@ export const PlayScreen: React.FC = () => {
 
   return (
     <SafeAreaView style={styles.safe}>
+      <SamVibeNav 
+        onPartnerChange={(newPartnerId) => {
+          const p = activePartners.find(p => p.user_id === newPartnerId);
+          if (p) handlePartnerSelect(p);
+        }} 
+      />
       <VibeRefreshControl 
         showsVerticalScrollIndicator={false}
         refreshing={refreshing} 
         onRefresh={onRefresh}
         iconMark="◐"
       >
-        <SamVibeNav 
-          onPartnerChange={(newPartnerId) => {
-            const p = activePartners.find(p => p.user_id === newPartnerId);
-            if (p) handlePartnerSelect(p);
-          }} 
-        />
         {/* Stats strip */}
         <View style={styles.stats1}>
           <View style={styles.stats}>

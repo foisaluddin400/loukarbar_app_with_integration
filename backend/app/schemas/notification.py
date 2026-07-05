@@ -41,11 +41,13 @@ class NotificationResponse(NotificationBase):
     status: NotificationStatus
     created_at: datetime
     delivered_at: Optional[datetime] = None
+    seen_at: Optional[datetime] = None
 
 class NotificationPaginatedResponse(BaseModel):
     success: bool
     data: List[NotificationResponse]
     total: int
+    unread_count: int = 0
     page: int
     size: int
 

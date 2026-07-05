@@ -33,7 +33,7 @@ export const updateUserName = async (name) => {
 };
 
 export const getUserProfile = async () => {
-  const response = await api.get('/users/me');
+  const response = await api.get('/users');
   return response.data;
 };
 

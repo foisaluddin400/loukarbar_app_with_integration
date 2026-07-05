@@ -16,6 +16,11 @@ export const markNotificationSeen = async (id) => {
   return response.data;
 };
 
+export const markNotificationUnread = async (id) => {
+  const response = await api.patch(`/notifications/${id}/unread`);
+  return response.data;
+};
+
 export const deleteNotification = async (id) => {
   const response = await api.delete(`/notifications/${id}`);
   return response.data;

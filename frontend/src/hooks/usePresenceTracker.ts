@@ -24,7 +24,7 @@ export const usePresenceTracker = () => {
             city = reverseGeocode[0].city || reverseGeocode[0].region;
           }
         } catch (e) {
-          console.log("Reverse geocode failed:", e);
+          // Silently catch known Android emulator reverse geocode NPE
         }
       }
 

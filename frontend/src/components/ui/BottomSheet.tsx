@@ -23,6 +23,7 @@ interface BottomSheetProps {
   title: string;
   kicker?: string;
   dark?: boolean;
+  noScroll?: boolean;
   children: React.ReactNode;
 }
 
@@ -34,6 +35,7 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
   title,
   kicker,
   dark = false,
+  noScroll = false,
   children,
 }) => {
   const translateY = useSharedValue(SCREEN_HEIGHT);
@@ -119,14 +121,20 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
           </View>
 
           {/* Content */}
-          <ScrollView
-            contentContainerStyle={[styles.content]}
-            showsVerticalScrollIndicator={false}
-            bounces={false}
-            keyboardShouldPersistTaps="handled"
-          >
-            {children}
-          </ScrollView>
+          {noScroll ? (
+            <View style={[styles.content, { flexShrink: 1 }]}>
+              {children}
+            </View>
+          ) : (
+            <ScrollView
+              contentContainerStyle={[styles.content]}
+              showsVerticalScrollIndicator={false}
+              bounces={false}
+              keyboardShouldPersistTaps="handled"
+            >
+              {children}
+            </ScrollView>
+          )}
         </Animated.View>
       </View>
       </GestureHandlerRootView>

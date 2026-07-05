@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { View, StyleSheet, Pressable, Alert, ActivityIndicator, Image, Platform } from "react-native";
+import { View, StyleSheet, Pressable, Alert, ActivityIndicator, Image, Platform, PanResponder, FlatList } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import { Swipeable } from 'react-native-gesture-handler';
@@ -22,9 +22,10 @@ import {
 } from "../../services/vibeCheckApi";
 import { listVibeDates } from "../../services/vibeDatesApi";
 import { deleteAccount } from "../../services/userApi";
-import { getMyNotifications, markNotificationSeen, deleteNotification, clearAllNotifications } from "../../services/notificationApi";
+import { getMyNotifications, markNotificationSeen, markNotificationUnread, deleteNotification, clearAllNotifications } from "../../services/notificationApi";
 import * as Clipboard from "expo-clipboard";
 import { DeviceEventEmitter } from "react-native";
+import { useModeSwitcher } from "../../hooks/useModeSwitcher";
 
 let CameraView: any = null;
 let useCameraPermissions: any = () => [null, async () => {}];
@@ -81,6 +82,7 @@ interface SamVibeNavProps {
 
 const SamVibeNav: React.FC<SamVibeNavProps> = ({ onPartnerChange }) => {
   const navigation = useNavigation<Nav>();
+  const { switchToAligned } = useModeSwitcher();
   const [settingsSheet, setSettingsSheet] = useState(false);
   const [inviteSheet, setInviteSheet] = useState(false);
   const [switchSheet, setSwitchSheet] = useState(false);
@@ -88,6 +90,7 @@ const SamVibeNav: React.FC<SamVibeNavProps> = ({ onPartnerChange }) => {
   const [requestsSheet, setRequestsSheet] = useState(false);
   const [notificationsSheet, setNotificationsSheet] = useState(false);
   const [scannerSheet, setScannerSheet] = useState(false);
+  const rowRefs = React.useRef<{[key: string]: any}>({});
   const [permission, requestPermission] = useCameraPermissions();
   const [isDeleteDataOpen, setIsDeleteDataOpen] = useState(false);
   const [deletePassword, setDeletePassword] = useState("");
@@ -111,6 +114,38 @@ const SamVibeNav: React.FC<SamVibeNavProps> = ({ onPartnerChange }) => {
   // Active connection index (which connection is selected)
   const [activeIdx, setActiveIdx] = useState(0);
 
+  const [notifPage, setNotifPage] = useState(1);
+  const [notifHasMore, setNotifHasMore] = useState(true);
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  const formatTime = (isoString: string) => {
+    if (!isoString) return "";
+    const d = new Date(isoString);
+    const now = new Date();
+    const diff = Math.floor((now.getTime() - d.getTime()) / 60000);
+    if (diff < 1) return "Just now";
+    if (diff < 60) return `${diff}m ago`;
+    const diffHours = Math.floor(diff / 60);
+    if (diffHours < 24) return `${diffHours}h ago`;
+    const diffDays = Math.floor(diffHours / 24);
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return d.toLocaleDateString();
+  };
+
+  const panResponder = React.useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_, gestureState) => {
+        return Math.abs(gestureState.dy) > 10 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx);
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dy > 30 || gestureState.dy < -30) {
+          switchToAligned();
+        }
+      },
+    })
+  ).current;
+
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
@@ -118,7 +153,7 @@ const SamVibeNav: React.FC<SamVibeNavProps> = ({ onPartnerChange }) => {
         getVibeProfile().catch(() => null),
         getConnections().catch(() => ({ data: [] })),
         getRequests().catch(() => ({ data: [] })),
-        getMyNotifications(1, 50).catch(() => ({ data: [] })),
+        getMyNotifications(1, 20).catch(() => ({ data: [], unread_count: 0 })),
       ]);
       if (profileData) setProfile(profileData);
       
@@ -126,6 +161,9 @@ const SamVibeNav: React.FC<SamVibeNavProps> = ({ onPartnerChange }) => {
       setConnections(conns);
       setRequests(requestsData?.data || []);
       setNotifications(notifsData?.data || []);
+      setUnreadCount(notifsData?.unread_count || 0);
+      setNotifPage(1);
+      setNotifHasMore((notifsData?.data?.length || 0) === 20);
       
       const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
       const datesRes = await listVibeDates(1, 100, tz).catch(() => null);
@@ -211,6 +249,21 @@ const SamVibeNav: React.FC<SamVibeNavProps> = ({ onPartnerChange }) => {
     : null;
 
   // ─── Handlers ──────────────────────────────────────────────
+
+  const loadMoreNotifications = async () => {
+    if (!notifHasMore || loading) return;
+    try {
+      const next = notifPage + 1;
+      const notifsData = await getMyNotifications(next, 20).catch(() => ({ data: [], unread_count: unreadCount }));
+      if (notifsData?.data?.length) {
+        setNotifications(prev => [...prev, ...notifsData.data]);
+        setNotifPage(next);
+        setNotifHasMore(notifsData.data.length === 20);
+      } else {
+        setNotifHasMore(false);
+      }
+    } catch (e) {}
+  };
 
   const handleGenerateInvite = async () => {
     try {
@@ -372,7 +425,7 @@ const SamVibeNav: React.FC<SamVibeNavProps> = ({ onPartnerChange }) => {
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
           <Pressable onPress={() => setNotificationsSheet(true)} style={{ position: 'relative', marginTop: 4 }}>
             <Ionicons name="notifications-outline" size={24} color={Colors.ink} />
-            {(requests.length + notifications.filter(n => n.status !== "seen").length) > 0 && (
+            {(requests.length + unreadCount) > 0 && (
               <View style={{
                 position: 'absolute',
                 top: -2,
@@ -388,27 +441,29 @@ const SamVibeNav: React.FC<SamVibeNavProps> = ({ onPartnerChange }) => {
                 paddingHorizontal: 2
               }}>
                 <AppText style={{ color: Colors.white, fontSize: 8, fontWeight: 'bold', lineHeight: 10 }}>
-                  {requests.length + notifications.filter(n => n.status !== "seen").length}
+                  {requests.length + unreadCount}
                 </AppText>
               </View>
             )}
           </Pressable>
-          <Pressable onPress={() => navigation.navigate('VibeProfile')} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            {profile?.name && (
-              <AppText variant="serifItalic" size={16} color={Colors.ink}>
-                {profile.name}
-              </AppText>
-            )}
-            {profilePictureUrl ? (
-              <Image source={{ uri: profilePictureUrl }} style={styles.navAvatar} />
-            ) : (
-              <View style={styles.navAvatarPlaceholder}>
-                <AppText style={{ color: '#fff', fontSize: 14, fontWeight: '600' }}>
-                  {myInitial}
+          <View {...panResponder.panHandlers}>
+            <Pressable onPress={() => navigation.navigate('VibeProfile')} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              {profile?.name && (
+                <AppText variant="serifItalic" size={16} color={Colors.ink}>
+                  {profile.name}
                 </AppText>
-              </View>
-            )}
-          </Pressable>
+              )}
+              {profilePictureUrl ? (
+                <Image source={{ uri: profilePictureUrl }} style={styles.navAvatar} />
+              ) : (
+                <View style={styles.navAvatarPlaceholder}>
+                  <AppText style={{ color: '#fff', fontSize: 14, fontWeight: '600' }}>
+                    {myInitial}
+                  </AppText>
+                </View>
+              )}
+            </Pressable>
+          </View>
         </View>
       </View>
 
@@ -558,7 +613,7 @@ const SamVibeNav: React.FC<SamVibeNavProps> = ({ onPartnerChange }) => {
               </AppText>
             </Pressable>
 
-            <Pressable style={styles.blackCard} onPress={() => navigation.navigate('AlignedApp')}>
+            <Pressable style={styles.blackCard} onPress={() => { setSettingsSheet(false); switchToAligned(); }}>
               <AppText variant="heading" size={17} color="#fff">
                 Flip to aligned.
               </AppText>
@@ -804,10 +859,11 @@ const SamVibeNav: React.FC<SamVibeNavProps> = ({ onPartnerChange }) => {
         }}
         kicker="UPDATES"
         title="Notifications"
+        noScroll
       >
-        <View style={{ gap: 16 }}>
+        <View style={{ flexShrink: 1, marginTop: 10 }}>
           {notifications.length > 0 && (
-            <View style={{ flexDirection: 'row', justifyContent: 'flex-end' }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'flex-end', paddingBottom: 16 }}>
               <Pressable onPress={handleClearAllNotifications}>
                 <AppText color={Colors.accent} size={14}>Clear All</AppText>
               </Pressable>
@@ -818,76 +874,134 @@ const SamVibeNav: React.FC<SamVibeNavProps> = ({ onPartnerChange }) => {
               No notifications.
             </AppText>
           ) : (
-            <>
-              {requests.map((req) => (
-                <View key={req.id} style={{ backgroundColor: '#fff', padding: 16, borderRadius: 12, borderWidth: 1, borderColor: Colors.rule }}>
-                  <AppText color={Colors.text} style={{ marginBottom: 12 }}>
-                    <AppText color={Colors.text} style={{ fontWeight: "bold" }}>{req.sender_name}</AppText> wants to connect with you.
-                  </AppText>
-                  <View style={{ flexDirection: "row", gap: 8 }}>
-                    <AppButton variant="solid" size="sm" style={{ flex: 1 }} onPress={() => handleRespondToRequest(req.id, true)}>
-                      Accept
-                    </AppButton>
-                    <AppButton variant="outline" size="sm" style={{ flex: 1 }} onPress={() => handleRespondToRequest(req.id, false)}>
-                      Decline
-                    </AppButton>
-                  </View>
-                </View>
-              ))}
-              
-              {notifications.map((notif) => {
-                const renderRightActions = () => (
-                  <Pressable 
-                    style={{ backgroundColor: '#ff4444', justifyContent: 'center', alignItems: 'center', width: 70, borderRadius: 12, marginLeft: 8 }}
-                    onPress={() => handleDeleteNotification(notif.id)}
-                  >
-                    <Ionicons name="trash" size={24} color="#fff" />
-                  </Pressable>
-                );
+            <FlatList
+              data={[...requests, ...notifications]}
+              keyExtractor={(item) => item.id || item.request_id || Math.random().toString()}
+              showsVerticalScrollIndicator={false}
+              onEndReached={loadMoreNotifications}
+              onEndReachedThreshold={0.5}
+              contentContainerStyle={{ paddingBottom: 40 }}
+              renderItem={({ item }) => {
+                if (item.sender_name) { // It's a request
+                  return (
+                    <View style={{ backgroundColor: '#fff', padding: 16, borderRadius: 12, borderWidth: 1, borderColor: Colors.rule, marginBottom: 16 }}>
+                      <AppText color={Colors.text} style={{ marginBottom: 12 }}>
+                        <AppText color={Colors.text} style={{ fontWeight: "bold" }}>{item.sender_name}</AppText> wants to connect with you.
+                      </AppText>
+                      <View style={{ flexDirection: "row", gap: 8 }}>
+                        <AppButton variant="solid" size="sm" style={{ flex: 1 }} onPress={() => handleRespondToRequest(item.id, true)}>Accept</AppButton>
+                        <AppButton variant="outline" size="sm" style={{ flex: 1 }} onPress={() => handleRespondToRequest(item.id, false)}>Decline</AppButton>
+                      </View>
+                    </View>
+                  );
+                }
+
+                // It's a notification
+                const notif = item;
+                const isUnread = notif.status !== "Seen";
+                const borderC = isUnread ? Colors.accent : 'transparent';
+                const bgC = isUnread ? '#ffffff' : 'rgba(255,255,255,0.4)';
+
                 const renderLeftActions = () => (
-                  <View style={{ backgroundColor: '#44aa44', justifyContent: 'center', alignItems: 'center', width: 70, borderRadius: 12, marginRight: 8 }}>
-                    <Ionicons name="checkmark" size={24} color="#fff" />
+                  <View style={{ justifyContent: 'center', height: '100%', flex: 1, alignItems: 'flex-start', paddingLeft: 24 }}>
+                    <Ionicons name="trash-outline" size={20} color={'#D9534F'} />
+                    <AppText color={'#D9534F'} variant="mono" style={{ fontSize: 10, marginTop: 4, letterSpacing: 1 }}>DELETE</AppText>
                   </View>
                 );
                 
+                const renderRightActions = () => (
+                  <View style={{ justifyContent: 'center', height: '100%', flex: 1, alignItems: 'flex-end', paddingRight: 24 }}>
+                    <Ionicons name={isUnread ? "checkmark-outline" : "mail-unread-outline"} size={20} color={isUnread ? '#44aa44' : Colors.accent} />
+                    <AppText color={isUnread ? '#44aa44' : Colors.accent} variant="mono" style={{ fontSize: 10, marginTop: 4, letterSpacing: 1 }}>{isUnread ? 'READ' : 'UNREAD'}</AppText>
+                  </View>
+                );
+
                 return (
-                  <Swipeable 
-                    key={notif.id}
-                    renderRightActions={renderRightActions}
-                    renderLeftActions={notif.status !== 'seen' ? renderLeftActions : undefined}
-                    onSwipeableLeftOpen={async () => {
-                       if (notif.status !== "seen") {
-                          await markNotificationSeen(notif.id);
-                          fetchData();
-                       }
-                    }}
-                  >
-                    <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 12, opacity: notif.status === "seen" ? 0.6 : 1, borderWidth: 1, borderColor: Colors.rule }}>
-                      <Pressable 
-                        style={{ flex: 1, padding: 16 }}
-                        onPress={async () => {
-                           if (notif.status !== "seen") {
-                              await markNotificationSeen(notif.id);
-                              fetchData();
+                  <View key={notif.id} style={{ marginBottom: 16 }}>
+                    <Swipeable 
+                      ref={ref => {
+                        if (ref) rowRefs.current[notif.id] = ref;
+                      }}
+                      renderLeftActions={renderLeftActions}
+                      renderRightActions={renderRightActions}
+                      overshootRight={true}
+                      overshootLeft={true}
+                      friction={1.5}
+                      onSwipeableLeftOpen={async () => {
+                         await handleDeleteNotification(notif.id);
+                         const nList = notifications.filter(x => x.id !== notif.id);
+                         setNotifications(nList);
+                      }}
+                      onSwipeableRightOpen={async () => {
+                         if (isUnread) {
+                            await markNotificationSeen(notif.id);
+                            setUnreadCount(prev => Math.max(0, prev - 1));
+                            const nList = [...notifications];
+                            const idx = nList.findIndex(x => x.id === notif.id);
+                            if (idx > -1) {
+                               nList[idx] = { ...nList[idx], status: "Seen" };
+                               setNotifications(nList);
+                            }
+                         } else {
+                            await markNotificationUnread(notif.id);
+                            setUnreadCount(prev => prev + 1);
+                            const nList = [...notifications];
+                            const idx = nList.findIndex(x => x.id === notif.id);
+                            if (idx > -1) {
+                               nList[idx] = { ...nList[idx], status: "Delivered" };
+                               setNotifications(nList);
+                            }
+                         }
+                         setTimeout(() => {
+                           if (rowRefs.current[notif.id]) {
+                             rowRefs.current[notif.id].close();
                            }
-                           setNotificationsSheet(false);
-                           if (notif.type === "VIBE_DATE" || notif.type === "DATE_PROPOSED") {
-                               navigation.navigate("VCDates", { dateId: notif.metadata?.date_id });
+                         }, 200);
+                      }}
+                    >
+                      <Pressable 
+                        style={({ pressed }) => [{ backgroundColor: bgC, borderRadius: 12, borderWidth: 1, borderColor: borderC, padding: 16 }, pressed && { opacity: 0.7 }]}
+                        onPress={async () => {
+                           if (isUnread) {
+                              await markNotificationSeen(notif.id);
+                              setUnreadCount(prev => Math.max(0, prev - 1));
+                              const nList = [...notifications];
+                              const idx = nList.findIndex(x => x.id === notif.id);
+                              if (idx > -1) {
+                                 nList[idx] = { ...nList[idx], status: "Seen" };
+                                 setNotifications(nList);
+                              }
+                           }
+                           
+                           if (notif.type === "Vibe Date" || notif.type === "VIBE_DATE" || notif.type === "DATE_PROPOSED") {
+                               setNotificationsSheet(false);
+                               navigation.navigate("VibeApp" as any, {
+                                 screen: "VCDates",
+                                 params: { dateId: notif.metadata?.date_id }
+                               } as any);
                            }
                         }}
                       >
-                        <AppText color={Colors.text} style={{ fontWeight: "bold", marginBottom: 4 }}>
-                          {notif.title}
-                        </AppText>
-                        <AppText color={Colors.muted}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, paddingRight: 8 }}>
+                            {isUnread && <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: Colors.accent, marginRight: 6, marginTop: 2 }} />}
+                            <AppText color={isUnread ? Colors.ink : Colors.muted} style={{ fontWeight: isUnread ? "bold" : "600", fontSize: 15 }}>
+                              {notif.title}
+                            </AppText>
+                          </View>
+                          <AppText color={Colors.muted} variant="mono" size={10} style={{ paddingTop: 2 }}>
+                            {formatTime(notif.created_at)}
+                          </AppText>
+                        </View>
+                        <AppText color={Colors.muted} style={{ fontSize: 14 }}>
                           {notif.message}
                         </AppText>
                       </Pressable>
-                    </View>
-                  </Swipeable>
+                    </Swipeable>
+                  </View>
                 );
-              })}
-            </>
+              }}
+            />
           )}
         </View>
       </BottomSheet>

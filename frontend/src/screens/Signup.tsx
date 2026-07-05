@@ -1,6 +1,6 @@
 import { SafeAreaView } from 'react-native-safe-area-context';
 import React, { useState } from 'react';
-import { View, StyleSheet, ScrollView, Alert, Pressable } from 'react-native';
+import { View, StyleSheet, ScrollView, Alert, Pressable, KeyboardAvoidingView, Platform } from 'react-native';
 import { useNavigation, NavigationProp } from '@react-navigation/native';
 import { Colors } from '../constants/colors';
 import { AppText } from '../components/ui/AppText';
@@ -39,7 +39,11 @@ const Signup = () => {
 
   return (
     <SafeAreaView style={styles.safe}>
-      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={{ flex: 1 }}
+      >
+        <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
         <View style={styles.content}>
           <AppText variant="smallCaps" color={Colors.accent} style={{ marginBottom: 14 }}>
             NEW BEGINNINGS
@@ -61,6 +65,7 @@ const Signup = () => {
             autoCapitalize="none"
             autoComplete="email"
             textContentType="emailAddress"
+            returnKeyType="next"
           />
 
           <View style={{ marginTop: 24 }}>
@@ -73,6 +78,8 @@ const Signup = () => {
               isPassword
               autoComplete="new-password"
               textContentType="newPassword"
+              returnKeyType="go"
+              onSubmitEditing={handleSignup}
             />
           </View>
         </View>
@@ -94,6 +101,7 @@ const Signup = () => {
           </Pressable>
         </View>
       </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 };
