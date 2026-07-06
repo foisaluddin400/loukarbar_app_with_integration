@@ -907,7 +907,7 @@ export const HomeScreen: React.FC = () => {
                 color={Colors.muted}
                 style={{ marginTop: 6, fontSize: 13 }}
               >
-                {syncData ? `${syncData.rituals.count} of ${syncData.rituals.target} days completed` : '0 of 7 days completed'}
+                {syncData ? `${syncData.rituals.count} of ${syncData.rituals.target} completed` : '0 of 14 completed'}
               </AppText>
             </View>
 

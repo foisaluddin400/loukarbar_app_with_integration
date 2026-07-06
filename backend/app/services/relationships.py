@@ -429,38 +429,45 @@ class RelationshipService:
         local_now = now.astimezone(tz)
         dates_to_check = [(local_now - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(7)]
         
-        # 1. Rituals (in last 7 days)
-        rituals_count = await rituals_coll.count_documents({
-            "user_id": {"$in": user_ids},
-            "created_at": {"$gte": seven_days_ago}
-        })
+        def calculate_metric_sync(user_count: int, partner_count: int, max_per_user: int = 7) -> tuple[int, int, int]:
+            # Cap the counts at the weekly max
+            u = min(user_count, max_per_user)
+            p = min(partner_count, max_per_user)
+            
+            total = u + p
+            max_total = max_per_user * 2 # 14
+            
+            if total == 0:
+                return 0, 0, max_total
+                
+            volume_score = total / max_total
+            diff = abs(u - p)
+            # max difference is max_per_user. penalize up to 50%
+            diff_penalty = diff / max_per_user
+            sync_multiplier = 1.0 - (diff_penalty * 0.5)
+            
+            perc = min(int((volume_score * sync_multiplier) * 100), 100)
+            return perc, total, max_total
+
+        # 1. Rituals
+        user_rituals = await rituals_coll.count_documents({"user_id": user_id, "created_at": {"$gte": seven_days_ago}})
+        partner_rituals = await rituals_coll.count_documents({"user_id": partner_id, "created_at": {"$gte": seven_days_ago}}) if partner_id else 0
+        r_perc, r_count, r_target = calculate_metric_sync(user_rituals, partner_rituals)
         
         # 2. Check-ins
-        checkins_count = await checkins_coll.count_documents({
-            "user_id": {"$in": user_ids},
-            "date": {"$in": dates_to_check}
-        })
+        user_checkins = await checkins_coll.count_documents({"user_id": user_id, "date": {"$in": dates_to_check}})
+        partner_checkins = await checkins_coll.count_documents({"user_id": partner_id, "date": {"$in": dates_to_check}}) if partner_id else 0
+        c_perc, c_count, c_target = calculate_metric_sync(user_checkins, partner_checkins)
         
-        # 3. Appreciations (Thread messages with category Appreciation)
-        appreciations_count = await messages_coll.count_documents({
-            "creator_id": {"$in": user_ids},
-            "category": "Appreciation",
-            "created_at": {"$gte": seven_days_ago}
-        })
+        # 3. Appreciations (ritual_type="appreciation")
+        user_appr = await rituals_coll.count_documents({"user_id": user_id, "ritual_type": "appreciation", "created_at": {"$gte": seven_days_ago}})
+        partner_appr = await rituals_coll.count_documents({"user_id": partner_id, "ritual_type": "appreciation", "created_at": {"$gte": seven_days_ago}}) if partner_id else 0
+        a_perc, a_count, a_target = calculate_metric_sync(user_appr, partner_appr)
         
         # 4. Threads (Any Thread message)
-        threads_count = await messages_coll.count_documents({
-            "creator_id": {"$in": user_ids},
-            "created_at": {"$gte": seven_days_ago}
-        })
-        
-        # Max targets
-        target = 7
-        
-        r_perc = min(int((rituals_count / target) * 100), 100)
-        c_perc = min(int((checkins_count / target) * 100), 100)
-        a_perc = min(int((appreciations_count / target) * 100), 100)
-        t_perc = min(int((threads_count / target) * 100), 100)
+        user_threads = await messages_coll.count_documents({"creator_id": user_id, "created_at": {"$gte": seven_days_ago}})
+        partner_threads = await messages_coll.count_documents({"creator_id": partner_id, "created_at": {"$gte": seven_days_ago}}) if partner_id else 0
+        t_perc, t_count, t_target = calculate_metric_sync(user_threads, partner_threads)
         
         # Weighted overall score
         # Rituals: 30%, Check-ins: 30%, Appreciations: 20%, Threads: 20%
@@ -468,10 +475,10 @@ class RelationshipService:
         
         return {
             "overall_score": overall,
-            "rituals": {"count": rituals_count, "target": target, "percentage": r_perc},
-            "checkins": {"count": checkins_count, "target": target, "percentage": c_perc},
-            "appreciations": {"count": appreciations_count, "target": target, "percentage": a_perc},
-            "threads": {"count": threads_count, "target": target, "percentage": t_perc}
+            "rituals": {"count": r_count, "target": r_target, "percentage": r_perc},
+            "checkins": {"count": c_count, "target": c_target, "percentage": c_perc},
+            "appreciations": {"count": a_count, "target": a_target, "percentage": a_perc},
+            "threads": {"count": t_count, "target": t_target, "percentage": t_perc}
         }
 
 relationship_service = RelationshipService()
