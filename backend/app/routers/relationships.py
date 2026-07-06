@@ -1,6 +1,8 @@
 import os
 import uuid
 import shutil
+import cv2
+import numpy as np
 from fastapi import APIRouter, HTTPException, Depends, status, UploadFile, File
 from fastapi.responses import FileResponse
 from app.schemas.relationships import RelationshipCreate, RelationshipResponse, AlignRequest, AlignResponse, BreakAlignmentRequest
@@ -195,14 +197,22 @@ async def upload_photo(file: UploadFile = File(...), current_user: dict = Depend
     """Uploads a profile photo for the authenticated user."""
     try:
         os.makedirs("uploads/profiles", exist_ok=True)
-        ext = os.path.splitext(file.filename)[1]
-        if not ext:
-            ext = ".jpg"
+        ext = ".jpg"
         filename = f"{uuid.uuid4().hex}{ext}"
         file_path = os.path.join("uploads", "profiles", filename)
         
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+        contents = await file.read()
+        nparr = np.frombuffer(contents, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        
+        if img is None:
+            raise ValueError("Invalid image file uploaded.")
+            
+        # Resize to 256x256 using INTER_AREA for downsampling
+        resized = cv2.resize(img, (256, 256), interpolation=cv2.INTER_AREA)
+        
+        # Save as optimized JPEG
+        cv2.imwrite(file_path, resized, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
             
         updated = await relationship_service.update_profile_photo(current_user["id"], file_path)
         return {"success": True, "message": "Photo uploaded successfully", "data": updated}

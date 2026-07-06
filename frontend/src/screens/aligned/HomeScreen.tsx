@@ -1,6 +1,7 @@
 import { SafeAreaView } from 'react-native-safe-area-context';
-import React, { useState } from "react";
+import React, { useState, useCallback } from "react";
 import { View, ScrollView, StyleSheet, Pressable } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { Colors } from "../../constants/colors";
 import { AppText } from "../../components/ui/AppText";
 import { AppButton } from "../../components/ui/AppButton";
@@ -70,20 +71,26 @@ export const HomeScreen: React.FC = () => {
   );
   const [userName, setUserName] = useState<string>("User");
 
-  React.useEffect(() => {
-    const fetchUser = async () => {
-      try {
-        const data = await getMe();
-        if (data && data.name) {
-          const firstName = data.name.trim().split(" ")[0];
-          setUserName(firstName);
+  useFocusEffect(
+    useCallback(() => {
+      const fetchUser = async () => {
+        try {
+          const data = await getMe();
+          if (data && data.name) {
+            const firstName = data.name.trim().split(" ")[0];
+            setUserName(firstName);
+          }
+          if (data && data.partner && data.partner.name) {
+            const partnerFirstName = data.partner.name.trim().split(" ")[0];
+            setPartnerName(partnerFirstName);
+          }
+        } catch (err) {
+          console.log("Error fetching user for greeting:", err);
         }
-      } catch (err) {
-        console.log("Error fetching user for greeting:", err);
-      }
-    };
-    fetchUser();
-  }, []);
+      };
+      fetchUser();
+    }, [])
+  );
 
   const [activeUser] = useState<"lou" | "amanda">("lou");
   const [sheet, setSheet] = useState<string | null>(null);
@@ -124,8 +131,9 @@ export const HomeScreen: React.FC = () => {
     question_3: "One thing on your mind..."
   });
 
-  React.useEffect(() => {
-    const loadData = async () => {
+  useFocusEffect(
+    useCallback(() => {
+      const loadData = async () => {
       try {
         const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
         const streakData = await getStreak(tz);
@@ -182,7 +190,6 @@ export const HomeScreen: React.FC = () => {
           if (mine) setMyMood(mine);
           if (theirs) {
              setPartnerMood(theirs);
-             setPartnerName(theirs.author_name);
           }
         }
       } catch (e) {
@@ -199,9 +206,10 @@ export const HomeScreen: React.FC = () => {
       } finally {
         setIsLoadingMood(false);
       }
-    };
-    loadData();
-  }, []);
+      };
+      loadData();
+    }, [])
+  );
 
   const handleAppreciationSubmit = async () => {
     if (!appreciationText.trim() || isSubmitting) return;
@@ -303,7 +311,13 @@ export const HomeScreen: React.FC = () => {
     <SafeAreaView style={styles.safe}>
       <AlignedNav></AlignedNav>
       <ScrollView showsVerticalScrollIndicator={false}>
-        <PresenceStrip />
+        <PresenceStrip 
+          onRedirect={(type) => {
+            if (type === 'Partner Check-in') {
+              setSheet("checkin");
+            }
+          }}
+        />
 
         <View style={styles.inner}>
           {/* Greeting */}
@@ -365,13 +379,16 @@ export const HomeScreen: React.FC = () => {
             </Pressable>
             {/* Ritual */}
             <View style={styles.ritualBlock}>
-              <AppText
-                variant="smallCaps"
-                color={Colors.muted}
-                style={{ marginBottom: 8 }}
-              >
-                Ritual · {formatTime(new Date())}
-              </AppText>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                <Pressable onPress={() => setSheet('checkin')}>
+                  <AppText variant="smallCaps" color={Colors.accent}>
+                    CHECK IN
+                  </AppText>
+                </Pressable>
+                <AppText variant="smallCaps" color={Colors.muted}>
+                  {'  '}·{'  '}Ritual · {formatTime(new Date())}
+                </AppText>
+              </View>
               <AppText
                 variant="display"
                 size={22}
@@ -607,7 +624,7 @@ export const HomeScreen: React.FC = () => {
             {/* Partner Section (read-only) */}
             <View style={{ borderWidth: 1, borderColor: Colors.rule, borderRadius: 0, marginBottom: 32 }}>
               <View style={{ flexDirection: "row", justifyContent: "space-between", backgroundColor: "#EAE2D4", padding: 12, borderBottomWidth: 1, borderBottomColor: Colors.rule }}>
-                <AppText variant="mono" size={11} color={Colors.ink2}>{activeUser === "lou" ? "AMANDA" : "LOU"}</AppText>
+                <AppText variant="mono" size={11} color={Colors.ink2}>{partnerName.toUpperCase()}</AppText>
                 <AppText variant="mono" size={11} color={Colors.muted}>Nº 02</AppText>
               </View>
               
@@ -940,7 +957,7 @@ export const HomeScreen: React.FC = () => {
         {/* Partner Section */}
         <View style={{ borderWidth: 1, borderColor: Colors.rule, borderRadius: 0, marginBottom: 32 }}>
           <View style={{ flexDirection: "row", justifyContent: "space-between", backgroundColor: "#EAE2D4", padding: 12, borderBottomWidth: 1, borderBottomColor: Colors.rule }}>
-            <AppText variant="mono" size={11} color={Colors.ink2}>{activeUser === "lou" ? "AMANDA" : "LOU"}</AppText>
+            <AppText variant="mono" size={11} color={Colors.ink2}>{partnerName.toUpperCase()}</AppText>
             <AppText variant="mono" size={11} color={Colors.muted}>Nº 02</AppText>
           </View>
           

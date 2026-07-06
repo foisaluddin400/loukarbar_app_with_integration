@@ -1,18 +1,27 @@
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, Pressable, ScrollView } from 'react-native';
+import { View, StyleSheet, Pressable, ScrollView, Image } from 'react-native';
 import { Colors } from '../../constants/colors';
 import { AppText } from '../ui/AppText';
 import { formatTime } from '../../utils/dateUtils';
 import { getPartnerProfile, alignWithPartner } from '../../services/userApi';
 import { getMyNotifications } from '../../services/notificationApi';
 import { getMe } from '../../services/authApi';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import api from '../../services/api';
 import { BottomSheet } from '../ui/BottomSheet';
 import { AppTextInput } from '../ui/AppTextInput';
 import { AppButton } from '../ui/AppButton';
 import * as Clipboard from 'expo-clipboard';
 import { Ionicons } from '@expo/vector-icons';
+import { Swipeable } from 'react-native-gesture-handler';
+import { markNotificationSeen, markNotificationUnread, deleteNotification, hideNotification, unhideNotification } from '../../services/notificationApi';
+export interface PresenceStripProps {
+  onRedirect?: (type: string) => void;
+}
 
-export const PresenceStrip: React.FC = () => {
+export const PresenceStrip: React.FC<PresenceStripProps> = ({ onRedirect }) => {
+  const rowRefs = React.useRef<{[key: string]: any}>({});
+  const [showHidden, setShowHidden] = useState(false);
   const [now, setNow] = useState(new Date());
   const [partner, setPartner] = useState<any>(null);
   const [me, setMe] = useState<any>(null);
@@ -20,6 +29,32 @@ export const PresenceStrip: React.FC = () => {
   const [isSheetOpen, setIsSheetOpen] = useState(false);
   const [inputKey, setInputKey] = useState("");
   const [isAligning, setIsAligning] = useState(false);
+  const [photoBlobUrl, setPhotoBlobUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchPartnerPhoto = async () => {
+      if (partner && partner.id && partner.profile_photo_url) {
+        try {
+          const t = await AsyncStorage.getItem('access_token');
+          if (t) {
+            const res = await fetch(`${api.defaults.baseURL}/users/photo/${partner.id}?t=${new Date().getTime()}`, {
+              headers: { Authorization: `Bearer ${t}` }
+            });
+            if (res.ok) {
+              const blob = await res.blob();
+              setPhotoBlobUrl(URL.createObjectURL(blob));
+            } else {
+              setPhotoBlobUrl(null);
+            }
+          }
+        } catch (e) {
+          console.log("Error fetching partner photo:", e);
+          setPhotoBlobUrl(null);
+        }
+      }
+    };
+    fetchPartnerPhoto();
+  }, [partner?.id, partner?.profile_photo_url]);
 
   const fetchPresenceData = async () => {
       try {
@@ -123,18 +158,30 @@ export const PresenceStrip: React.FC = () => {
     );
   }
 
-  // Calculate dot color based on last_active_at
+  // Calculate dot color and active status string based on last_active_at
   let dotColor = Colors.accent; // Default red
   let isOnline = false;
+  let activeStatusStr = '○ AWAY';
+
   if (partner.last_active_at) {
     const lastActive = new Date(partner.last_active_at);
-    const diffMins = (now.getTime() - lastActive.getTime()) / 60000;
+    const diffMins = Math.floor((now.getTime() - lastActive.getTime()) / 60000);
     
     if (diffMins < 5) {
       dotColor = '#4CAF50'; // Green
       isOnline = true;
+      activeStatusStr = '● ACTIVE NOW';
     } else if (diffMins < 60) {
       dotColor = '#FFC107'; // Yellow
+      activeStatusStr = `○ ACTIVE ${diffMins}M AGO`;
+    } else {
+      const diffHours = Math.floor(diffMins / 60);
+      if (diffHours < 24) {
+        activeStatusStr = `○ ACTIVE ${diffHours}H AGO`;
+      } else {
+        const diffDays = Math.floor(diffHours / 24);
+        activeStatusStr = `○ ACTIVE ${diffDays}D AGO`;
+      }
     }
   }
 
@@ -143,7 +190,7 @@ export const PresenceStrip: React.FC = () => {
   
   // Calculate partner local time based on the timezone from their latest presence or fallback
   let partnerTime = new Date();
-  let locationStr = partner.city_name ? partner.city_name.toUpperCase() : 'UNKNOWN';
+  let locationStr = partner.location_city ? partner.location_city.toUpperCase() : 'UNKNOWN';
   
   if (latestPresence) {
     // If we have a timezone, try to calculate their local time
@@ -166,9 +213,13 @@ export const PresenceStrip: React.FC = () => {
         <View style={styles.left}>
           <View style={styles.avatarWrap}>
             <View style={styles.avatar}>
-              <AppText variant="mono" color={Colors.bone} style={{ fontSize: 13, fontWeight: '500' }}>
-                {partnerName[0].toUpperCase()}
-              </AppText>
+              {partner.profile_photo_url && photoBlobUrl ? (
+                <Image source={{ uri: photoBlobUrl }} style={{ width: '100%', height: '100%', borderRadius: 18 }} />
+              ) : (
+                <AppText variant="mono" color={Colors.bone} style={{ fontSize: 13, fontWeight: '500' }}>
+                  {partnerName[0].toUpperCase()}
+                </AppText>
+              )}
             </View>
             <View style={[styles.dot, { backgroundColor: dotColor }]} />
           </View>
@@ -183,9 +234,17 @@ export const PresenceStrip: React.FC = () => {
         </View>
         <Pressable onPress={() => setIsSheetOpen(true)} style={styles.seeMoreBtn}>
           <AppText variant="mono" color={Colors.light} style={{ fontSize: 10 }}>
-            {isOnline ? '● HERE' : '○ AWAY'}
+            {activeStatusStr}
           </AppText>
-          <AppText variant="mono" color={Colors.muted} style={{ fontSize: 9, marginTop: 4 }}>
+          <AppText 
+            variant="mono" 
+            color={presenceNotifications.some(n => n.status !== "Seen") ? Colors.accent : Colors.muted} 
+            style={{ 
+              fontSize: 9, 
+              marginTop: 4, 
+              fontWeight: presenceNotifications.some(n => n.status !== "Seen") ? 'bold' : 'normal' 
+            }}
+          >
             SEE MORE
           </AppText>
         </Pressable>
@@ -197,27 +256,116 @@ export const PresenceStrip: React.FC = () => {
         title={`${partnerName}'s Activity`}
         kicker="PRESENCE HISTORY"
       >
-        <ScrollView style={{ maxHeight: 400, marginTop: 10 }}>
+        <View style={{ flexDirection: 'row', justifyContent: 'flex-end', paddingBottom: 10, paddingHorizontal: 20, marginTop: 10 }}>
+          <Pressable onPress={() => setShowHidden(!showHidden)}>
+            <AppText color={Colors.accent} size={14}>
+              {showHidden ? "Back to History" : "Hidden"}
+            </AppText>
+          </Pressable>
+        </View>
+        <ScrollView style={{ maxHeight: 400 }}>
           {presenceNotifications.length === 0 ? (
             <AppText color={Colors.muted} style={{ textAlign: 'center', marginTop: 20 }}>
               No recent activity recorded.
             </AppText>
           ) : (
-            presenceNotifications.map((n, idx) => (
-              <View key={n.id || idx} style={styles.historyItem}>
-                <View style={styles.historyLeft}>
-                  <AppText variant="serifItalic" size={16} color={Colors.ink}>
-                    {n.message}
-                  </AppText>
-                  <AppText variant="smallCaps" color={Colors.muted} style={{ marginTop: 4 }}>
-                    {new Date(n.created_at).toLocaleDateString()}
-                  </AppText>
+            presenceNotifications
+            .filter(n => showHidden ? n.is_hidden : !n.is_hidden)
+            .map((n, idx) => {
+              const isUnread = n.status !== "Seen";
+              const borderC = isUnread ? Colors.accent : Colors.rule;
+              const bgC = isUnread ? '#ffffff' : 'transparent';
+              const isHidden = n.is_hidden;
+
+              const renderLeftActions = () => (
+                <View style={{ justifyContent: 'center', height: '100%', flex: 1, alignItems: 'flex-start', paddingLeft: 24 }}>
+                  <Ionicons name="trash-outline" size={20} color={'#D9534F'} />
+                  <AppText color={'#D9534F'} variant="mono" style={{ fontSize: 10, marginTop: 4, letterSpacing: 1 }}>DELETE</AppText>
                 </View>
-                <AppText variant="mono" color={Colors.muted} style={{ fontSize: 11 }}>
-                  {formatTime(new Date(n.created_at))}
-                </AppText>
-              </View>
-            ))
+              );
+
+              const renderRightActions = () => (
+                <View style={{ justifyContent: 'center', height: '100%', flex: 1, alignItems: 'flex-end', paddingRight: 24 }}>
+                  <Ionicons name={isHidden ? "eye-outline" : "eye-off-outline"} size={20} color={Colors.accent} />
+                  <AppText color={Colors.accent} variant="mono" style={{ fontSize: 10, marginTop: 4, letterSpacing: 1 }}>{isHidden ? "UNHIDE" : "HIDE"}</AppText>
+                </View>
+              );
+
+              return (
+                <View key={n.id || idx} style={{ marginBottom: 16 }}>
+                  <Swipeable
+                    ref={ref => {
+                      if (ref) rowRefs.current[n.id] = ref;
+                    }}
+                    renderLeftActions={renderLeftActions}
+                    renderRightActions={renderRightActions}
+                    overshootLeft={true}
+                    overshootRight={true}
+                    friction={1.5}
+                    onSwipeableLeftOpen={async () => {
+                      await deleteNotification(n.id);
+                      setPresenceNotifications(prev => prev.filter(x => x.id !== n.id));
+                      setTimeout(() => {
+                        if (rowRefs.current[n.id]) {
+                          rowRefs.current[n.id].close();
+                        }
+                      }, 200);
+                    }}
+                    onSwipeableRightOpen={async () => {
+                      if (isHidden) {
+                        await unhideNotification(n.id);
+                        setPresenceNotifications(prev => prev.map(x => x.id === n.id ? { ...x, is_hidden: false } : x));
+                      } else {
+                        await hideNotification(n.id);
+                        setPresenceNotifications(prev => prev.map(x => x.id === n.id ? { ...x, is_hidden: true } : x));
+                      }
+                      setTimeout(() => {
+                        if (rowRefs.current[n.id]) {
+                          rowRefs.current[n.id].close();
+                        }
+                      }, 200);
+                    }}
+                  >
+                    <Pressable
+                      style={({ pressed }) => [
+                        { backgroundColor: bgC, padding: 12, borderRadius: 8, borderWidth: 1, borderColor: borderC, marginHorizontal: 20 },
+                        pressed && { opacity: 0.7 }
+                      ]}
+                      onPress={async () => {
+                        if (isUnread) {
+                          await markNotificationSeen(n.id);
+                          setPresenceNotifications(prev => {
+                            const newList = [...prev];
+                            const index = newList.findIndex(x => x.id === n.id);
+                            if (index > -1) newList[index] = { ...newList[index], status: "Seen" };
+                            return newList;
+                          });
+                        }
+                        if (n.type === 'Partner Check-in') {
+                          setIsSheetOpen(false);
+                          if (onRedirect) onRedirect('Partner Check-in');
+                        }
+                      }}
+                    >
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                          {isUnread && <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: Colors.accent, marginRight: 6, marginTop: 2 }} />}
+                          <AppText variant="serifItalic" size={16} color={Colors.ink} style={{ fontWeight: isUnread ? "bold" : "normal" }}>
+                            {n.message}
+                          </AppText>
+                        </View>
+                        <AppText variant="mono" color={Colors.muted} style={{ fontSize: 11, marginLeft: 8, paddingTop: 4 }}>
+                          {formatTime(new Date(n.created_at))}
+                        </AppText>
+                      </View>
+                      <AppText variant="smallCaps" color={Colors.muted} style={{ marginTop: 4, marginLeft: isUnread ? 12 : 0 }}>
+                        {new Date(n.created_at).toLocaleDateString()}
+                      </AppText>
+                    </Pressable>
+                  </Swipeable>
+                </View>
+              );
+            })
           )}
         </ScrollView>
       </BottomSheet>

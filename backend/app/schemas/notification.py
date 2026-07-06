@@ -39,6 +39,7 @@ class NotificationResponse(NotificationBase):
     sender_id: str
     recipient_id: str
     status: NotificationStatus
+    is_hidden: bool = False
     created_at: datetime
     delivered_at: Optional[datetime] = None
     seen_at: Optional[datetime] = None

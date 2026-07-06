@@ -90,6 +90,8 @@ class RelationshipResponseData(BaseModel):
     is_aligned: bool = False
     partner: Optional[PartnerInfo] = None
     last_active_at: Optional[datetime.datetime] = None
+    profile_photo_url: Optional[str] = None
+    location_city: Optional[str] = None
 
     model_config = {
         "populate_by_name": True

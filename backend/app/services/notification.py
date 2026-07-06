@@ -93,6 +93,20 @@ class NotificationService:
         )
         return result.deleted_count > 0
 
+    async def hide_notification(self, notification_id: str, user_id: str) -> bool:
+        result = await self.notifications_collection.update_one(
+            {"_id": ObjectId(notification_id), "recipient_id": user_id},
+            {"$set": {"is_hidden": True}}
+        )
+        return result.modified_count > 0
+
+    async def unhide_notification(self, notification_id: str, user_id: str) -> bool:
+        result = await self.notifications_collection.update_one(
+            {"_id": ObjectId(notification_id), "recipient_id": user_id},
+            {"$set": {"is_hidden": False}}
+        )
+        return result.modified_count > 0
+
     async def clear_all_notifications(self, user_id: str) -> int:
         result = await self.notifications_collection.delete_many(
             {"recipient_id": user_id}
@@ -102,6 +116,8 @@ class NotificationService:
     async def _map_notification(self, d: Dict[str, Any], user_timezone: str) -> Dict[str, Any]:
         d["id"] = str(d["_id"])
         if "_id" in d: del d["_id"]
+        
+        d["is_hidden"] = d.get("is_hidden", False)
 
         try:
             tz = zoneinfo.ZoneInfo(user_timezone)

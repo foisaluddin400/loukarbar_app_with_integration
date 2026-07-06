@@ -50,6 +50,22 @@ async def mark_notification_unread(notification_id: str, current_user: dict = De
         raise HTTPException(status_code=404, detail="Notification not found or already unread.")
     return GenericResponse(success=True, message="Notification marked as unread.")
 
+@router.patch("/{notification_id}/hide", response_model=GenericResponse)
+async def hide_notification(notification_id: str, current_user: dict = Depends(get_current_user)):
+    """Hide a notification."""
+    success = await notification_service.hide_notification(notification_id, current_user["id"])
+    if not success:
+        raise HTTPException(status_code=404, detail="Notification not found.")
+    return GenericResponse(success=True, message="Notification hidden.")
+
+@router.patch("/{notification_id}/unhide", response_model=GenericResponse)
+async def unhide_notification(notification_id: str, current_user: dict = Depends(get_current_user)):
+    """Unhide a notification."""
+    success = await notification_service.unhide_notification(notification_id, current_user["id"])
+    if not success:
+        raise HTTPException(status_code=404, detail="Notification not found.")
+    return GenericResponse(success=True, message="Notification unhidden.")
+
 @router.delete("/", response_model=GenericResponse)
 async def clear_all_notifications(current_user: dict = Depends(get_current_user)):
     """Clear all notifications for the user."""

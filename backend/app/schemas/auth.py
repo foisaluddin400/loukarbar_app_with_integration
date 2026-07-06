@@ -60,6 +60,7 @@ class UserMeResponse(BaseModel):
     secret_key: Optional[str] = None
     profile_photo_url: Optional[str] = None
     last_active_at: Optional[datetime.datetime] = None
+    location_city: Optional[str] = None
 
     model_config = {
         "populate_by_name": True

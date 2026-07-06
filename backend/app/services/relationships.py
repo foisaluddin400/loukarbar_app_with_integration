@@ -322,6 +322,28 @@ class RelationshipService:
             partner["id"] = str(partner["_id"])
             partner["_id"] = str(partner["_id"])
             
+        timestamps = []
+        if partner.get("last_active_at"):
+            timestamps.append(partner["last_active_at"])
+            
+        # Check check_ins
+        latest_checkin = await self.db["check_ins"].find_one({"user_id": partner_id}, sort=[("created_at", -1)])
+        if latest_checkin and latest_checkin.get("created_at"):
+            timestamps.append(latest_checkin["created_at"])
+            
+        # Check thread_messages
+        latest_msg = await self.db["thread_messages"].find_one({"creator_id": partner_id}, sort=[("created_at", -1)])
+        if latest_msg and latest_msg.get("created_at"):
+            timestamps.append(latest_msg["created_at"])
+            
+        # Check ritual_completions
+        latest_ritual = await self.db["ritual_completions"].find_one({"user_id": partner_id}, sort=[("created_at", -1)])
+        if latest_ritual and latest_ritual.get("created_at"):
+            timestamps.append(latest_ritual["created_at"])
+            
+        if timestamps:
+            partner["last_active_at"] = max(timestamps)
+            
         return partner
 
     async def update_user(self, user_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
