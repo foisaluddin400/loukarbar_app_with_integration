@@ -92,6 +92,7 @@ class RelationshipResponseData(BaseModel):
     last_active_at: Optional[datetime.datetime] = None
     profile_photo_url: Optional[str] = None
     location_city: Optional[str] = None
+    latest_ritual: Optional[Dict[str, Any]] = None
 
     model_config = {
         "populate_by_name": True

@@ -321,6 +321,87 @@ class StreakSystem:
             "streak": streak
         }
 
+    async def get_partner_history(self, user_id: str, page: int, limit: int, timezone: str) -> Dict[str, Any]:
+        user = await self.users_collection.find_one({"_id": ObjectId(user_id)})
+        partner_id = None
+        if user and user.get("partner"):
+            partner_id = user["partner"]["user_id"]
+            
+        if not partner_id:
+            return {"data": [], "page": page, "limit": limit, "total": 0}
+            
+        skip = (page - 1) * limit
+        # Exclude rituals that are logically deleted by the requesting user
+        query = {
+            "user_id": partner_id,
+            "deleted_from": {"$ne": user_id}
+        }
+        
+        cursor = self.rituals_collection.find(query)\
+            .sort([("completed_date", -1), ("created_at", -1)])\
+            .skip(skip).limit(limit)
+        docs = await cursor.to_list(length=None)
+        total = await self.rituals_collection.count_documents(query)
+        
+        data = []
+        partner_name_str = user["partner"].get("name", "Partner")
+        user_name = user.get("name", "Me")
+        
+        for doc in docs:
+            created_at_dt = doc.get("created_at")
+            if created_at_dt:
+                from datetime import timezone
+                if created_at_dt.tzinfo is None:
+                    created_at_dt = created_at_dt.replace(tzinfo=timezone.utc)
+                created_at_str = created_at_dt.isoformat()
+            else:
+                created_at_str = None
+                
+            ritual_dict = {
+                "ritual_id": str(doc["_id"]),
+                "date": doc.get("completed_date"),
+                "ritual_type": doc.get("ritual_type", "unknown"),
+                "completed": True,
+                "text": doc.get("text"),
+                "file_path": doc.get("file_path"),
+                "author_name": partner_name_str,
+                "is_partner": True,
+                "partner_name": user_name,
+                "time": doc.get("time"),
+                "time_name": doc.get("time_name"),
+                "created_at": created_at_str,
+                "is_hidden": user_id in doc.get("hidden_from", [])
+            }
+            data.append(ritual_dict)
+            
+        # We need to return streak and total to match RitualHistoryResponse
+        # But partner history doesn't calculate streak here, just return 0 for now
+        return {
+            "data": data,
+            "page": page,
+            "limit": limit,
+            "total": total,
+            "streak": 0
+        }
+
+    async def update_ritual_visibility(self, user_id: str, ritual_id: str, action: str) -> bool:
+        if action not in ["hide", "unhide", "delete"]:
+            raise ValueError("Invalid action")
+            
+        update_op = {}
+        if action == "hide":
+            update_op = {"$addToSet": {"hidden_from": user_id}}
+        elif action == "unhide":
+            update_op = {"$pull": {"hidden_from": user_id}}
+        elif action == "delete":
+            update_op = {"$addToSet": {"deleted_from": user_id}}
+            
+        result = await self.rituals_collection.update_one(
+            {"_id": ObjectId(ritual_id)},
+            update_op
+        )
+        return result.modified_count > 0
+
     async def get_debug_history(self, user_id: str) -> List[str]:
         cursor = self.rituals_collection.find({"user_id": user_id}).sort("completed_date", 1)
         docs = await cursor.to_list(length=None)

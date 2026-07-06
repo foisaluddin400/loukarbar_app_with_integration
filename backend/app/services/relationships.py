@@ -1,6 +1,7 @@
 import random
 import string
 from typing import List, Dict, Any
+from datetime import datetime, timezone
 from motor.motor_asyncio import AsyncIOMotorClient
 from app.core.config import settings
 from app.schemas.relationships import RelationshipCreate
@@ -338,11 +339,23 @@ class RelationshipService:
             
         # Check ritual_completions
         latest_ritual = await self.db["ritual_completions"].find_one({"user_id": partner_id}, sort=[("created_at", -1)])
-        if latest_ritual and latest_ritual.get("created_at"):
-            timestamps.append(latest_ritual["created_at"])
+        if latest_ritual:
+            if latest_ritual.get("created_at"):
+                timestamps.append(latest_ritual["created_at"])
+            # Format _id and created_at to strings for the frontend
+            latest_ritual["_id"] = str(latest_ritual["_id"])
+            if latest_ritual.get("created_at"):
+                ritual_dt = latest_ritual["created_at"]
+                if ritual_dt.tzinfo is None:
+                    ritual_dt = ritual_dt.replace(tzinfo=timezone.utc)
+                latest_ritual["created_at"] = ritual_dt.isoformat()
+            partner["latest_ritual"] = latest_ritual
             
         if timestamps:
-            partner["last_active_at"] = max(timestamps)
+            max_ts = max(timestamps)
+            if max_ts.tzinfo is None:
+                max_ts = max_ts.replace(tzinfo=timezone.utc)
+            partner["last_active_at"] = max_ts
             
         return partner
 

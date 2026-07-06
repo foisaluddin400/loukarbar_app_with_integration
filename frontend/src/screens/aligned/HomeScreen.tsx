@@ -2,6 +2,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import React, { useState, useCallback } from "react";
 import { View, ScrollView, StyleSheet, Pressable } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
+import { Swipeable } from 'react-native-gesture-handler';
+import { Ionicons } from '@expo/vector-icons';
 import { Colors } from "../../constants/colors";
 import { AppText } from "../../components/ui/AppText";
 import { AppButton } from "../../components/ui/AppButton";
@@ -20,7 +22,7 @@ import OurPlaylist from "./OurPlaylist";
 import { usePresenceTracker } from "../../hooks/usePresenceTracker";
 import { getMe } from "../../services/authApi";
 import { getStreak } from "../../services/streakApi";
-import { completeRitual } from "../../services/ritualApi";
+import { completeRitual, getPartnerRituals, updateRitualVisibility } from "../../services/ritualApi";
 import { createCheckin, updateCheckin, getCheckin, getQuestionsEndpoint } from "../../services/checkinApi";
 import { getAlignedSyncSummary } from "../../services/userApi";
 
@@ -102,10 +104,18 @@ export const HomeScreen: React.FC = () => {
   const [myMood, setMyMood] = useState<any>(null);
   const [partnerMood, setPartnerMood] = useState<any>(null);
   const [partnerName, setPartnerName] = useState<string>("Partner");
+  const [partnerProfile, setPartnerProfile] = useState<any>(null);
   const [isLoadingMood, setIsLoadingMood] = useState<boolean>(true);
   const [moodError, setMoodError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [syncData, setSyncData] = useState<any>(null);
+
+  // Partner Rituals History
+  const [partnerRitualHistory, setPartnerRitualHistory] = useState<any[]>([]);
+  const [hasPartnerRituals, setHasPartnerRituals] = useState<boolean>(false);
+  const [showHiddenRituals, setShowHiddenRituals] = useState<boolean>(false);
+  const [isLoadingPartnerRituals, setIsLoadingPartnerRituals] = useState<boolean>(false);
+  const ritualRowRefs = React.useRef<{[key: string]: any}>({});
 
   // Appreciation State
   const [appreciationText, setAppreciationText] = useState("");
@@ -206,6 +216,18 @@ export const HomeScreen: React.FC = () => {
       } finally {
         setIsLoadingMood(false);
       }
+      
+      try {
+        const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        const res = await getPartnerRituals(1, 100, tz);
+        if (res && res.data) {
+          setPartnerRitualHistory(res.data);
+          setHasPartnerRituals(res.data.filter((r: any) => !r.is_hidden).length > 0);
+        }
+      } catch (e) {
+        console.log("Error fetching partner rituals:", e);
+      }
+      
       };
       loadData();
     }, [])
@@ -312,9 +334,15 @@ export const HomeScreen: React.FC = () => {
       <AlignedNav></AlignedNav>
       <ScrollView showsVerticalScrollIndicator={false}>
         <PresenceStrip 
-          onRedirect={(type) => {
+          onRedirect={(type, partnerData) => {
+            if (partnerData) {
+              setPartnerProfile(partnerData);
+            }
             if (type === 'Partner Check-in') {
               setSheet("checkin");
+            }
+            if (type === 'Ritual Completed') {
+              setSheet("partner_ritual_history");
             }
           }}
         />
@@ -386,7 +414,18 @@ export const HomeScreen: React.FC = () => {
                   </AppText>
                 </Pressable>
                 <AppText variant="smallCaps" color={Colors.muted}>
-                  {'  '}·{'  '}Ritual · {formatTime(new Date())}
+                  {'  '}·{'  '}
+                </AppText>
+                <Pressable 
+                  onPress={() => hasPartnerRituals && setSheet('partner_ritual_history')}
+                  disabled={!hasPartnerRituals}
+                >
+                  <AppText variant="smallCaps" color={hasPartnerRituals ? Colors.accent : Colors.muted}>
+                    RITUAL
+                  </AppText>
+                </Pressable>
+                <AppText variant="smallCaps" color={Colors.muted}>
+                  {'  '}· {formatTime(new Date())}
                 </AppText>
               </View>
               <AppText
@@ -678,6 +717,119 @@ export const HomeScreen: React.FC = () => {
           {isSubmitting ? (hasCheckedInToday ? "Updating..." : "Submitting...") : (hasCheckedInToday ? "Update →" : "Submit →")}
         </AppButton>
       </BottomSheet>
+
+      {/* Partner Ritual sheet */}
+      <BottomSheet
+        open={sheet === "partner_ritual_history"}
+        onClose={() => setSheet(null)}
+        kicker={`${partnerName}'s RITUALS`.toUpperCase()}
+        title="What they shared with you"
+        snapPoints={['50%', '80%']}
+      >
+        <View style={{ paddingVertical: 10 }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16, alignItems: 'center' }}>
+            <AppText variant="smallCaps" color={Colors.muted} style={{ fontSize: 10 }}>
+              {showHiddenRituals ? 'HIDDEN RITUALS' : 'RECENT RITUALS'}
+            </AppText>
+            <Pressable onPress={() => setShowHiddenRituals(!showHiddenRituals)}>
+              <AppText variant="mono" color={Colors.accent} style={{ fontSize: 11 }}>
+                {showHiddenRituals ? 'SHOW ACTIVE' : 'SHOW HIDDEN'}
+              </AppText>
+            </Pressable>
+          </View>
+          
+          {isLoadingPartnerRituals ? (
+            <AppText variant="serifItalic" size={16} color={Colors.muted}>
+              Loading...
+            </AppText>
+          ) : partnerRitualHistory.filter(r => (showHiddenRituals ? r.is_hidden : !r.is_hidden)).length > 0 ? (
+            <ScrollView style={{ maxHeight: 400 }} showsVerticalScrollIndicator={false}>
+              {partnerRitualHistory
+                .filter(r => (showHiddenRituals ? r.is_hidden : !r.is_hidden))
+                .map((ritual) => {
+                  const renderLeftActions = () => (
+                    <View style={{ justifyContent: 'center', height: '100%', flex: 1, alignItems: 'flex-start', paddingLeft: 24, paddingBottom: 12 }}>
+                      <Ionicons name="trash-outline" size={20} color={'#D9534F'} />
+                      <AppText color={'#D9534F'} variant="mono" style={{ fontSize: 10, marginTop: 4, letterSpacing: 1 }}>DELETE</AppText>
+                    </View>
+                  );
+
+                  const renderRightActions = () => (
+                    <View style={{ justifyContent: 'center', height: '100%', flex: 1, alignItems: 'flex-end', paddingRight: 24, paddingBottom: 12 }}>
+                      <Ionicons name={showHiddenRituals ? "eye-outline" : "eye-off-outline"} size={20} color={Colors.accent} />
+                      <AppText color={Colors.accent} variant="mono" style={{ fontSize: 10, marginTop: 4, letterSpacing: 1 }}>{showHiddenRituals ? "UNHIDE" : "HIDE"}</AppText>
+                    </View>
+                  );
+
+                  return (
+                    <Swipeable
+                      key={ritual.ritual_id}
+                      ref={ref => {
+                        if (ref) ritualRowRefs.current[ritual.ritual_id] = ref;
+                      }}
+                      renderLeftActions={renderLeftActions}
+                      renderRightActions={renderRightActions}
+                      overshootLeft={true}
+                      overshootRight={true}
+                      friction={1.5}
+                      onSwipeableLeftOpen={async () => {
+                        try {
+                          await updateRitualVisibility(ritual.ritual_id, 'delete');
+                          setPartnerRitualHistory(prev => prev.filter(r => r.ritual_id !== ritual.ritual_id));
+                          setHasPartnerRituals(partnerRitualHistory.filter(r => !r.is_hidden && r.ritual_id !== ritual.ritual_id).length > 0);
+                        } catch (e) {
+                          console.log("Error deleting ritual", e);
+                        }
+                        setTimeout(() => {
+                          if (ritualRowRefs.current[ritual.ritual_id]) {
+                            ritualRowRefs.current[ritual.ritual_id].close();
+                          }
+                        }, 200);
+                      }}
+                      onSwipeableRightOpen={async () => {
+                        try {
+                          await updateRitualVisibility(ritual.ritual_id, showHiddenRituals ? 'unhide' : 'hide');
+                          setPartnerRitualHistory(prev => prev.map(r => r.ritual_id === ritual.ritual_id ? { ...r, is_hidden: !showHiddenRituals } : r));
+                          setHasPartnerRituals(partnerRitualHistory.filter(r => !r.is_hidden && (showHiddenRituals ? r.ritual_id === ritual.ritual_id : r.ritual_id !== ritual.ritual_id)).length > 0);
+                        } catch (e) {
+                          console.log("Error toggling hide ritual", e);
+                        }
+                        setTimeout(() => {
+                          if (ritualRowRefs.current[ritual.ritual_id]) {
+                            ritualRowRefs.current[ritual.ritual_id].close();
+                          }
+                        }, 200);
+                      }}
+                    >
+                      <View style={{ borderWidth: 1, borderColor: Colors.rule, padding: 16, backgroundColor: '#EAE2D4', marginBottom: 12, borderRadius: 8 }}>
+                        <AppText variant="mono" size={11} color={Colors.muted} style={{ marginBottom: 12 }}>
+                          {new Date(ritual.created_at || ritual.date).toLocaleString()}
+                        </AppText>
+                        <AppText variant="serifItalic" size={18} color={Colors.ink} style={{ lineHeight: 26 }}>
+                          "{ritual.text || 'Completed their ritual.'}"
+                        </AppText>
+                      </View>
+                    </Swipeable>
+                  );
+                })}
+            </ScrollView>
+          ) : (
+            <AppText variant="serifItalic" size={16} color={Colors.muted}>
+              {showHiddenRituals ? "No hidden rituals." : "No recent rituals found."}
+            </AppText>
+          )}
+        </View>
+        <AppButton
+          variant="solid"
+          full
+          size="lg"
+          onPress={() => setSheet(null)}
+          style={{ marginTop: 20 }}
+        >
+          Close
+        </AppButton>
+      </BottomSheet>
+
 
       {/* Sync score sheet */}
 

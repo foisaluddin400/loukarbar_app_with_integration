@@ -16,7 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Swipeable } from 'react-native-gesture-handler';
 import { markNotificationSeen, markNotificationUnread, deleteNotification, hideNotification, unhideNotification } from '../../services/notificationApi';
 export interface PresenceStripProps {
-  onRedirect?: (type: string) => void;
+  onRedirect?: (type: string, data?: any) => void;
 }
 
 export const PresenceStrip: React.FC<PresenceStripProps> = ({ onRedirect }) => {
@@ -75,7 +75,7 @@ export const PresenceStrip: React.FC<PresenceStripProps> = ({ onRedirect }) => {
         }
 
         if (notificationsRes.success && notificationsRes.data) {
-          const presenceOnly = notificationsRes.data.filter((n: any) => n.type === 'Presence' || n.type === 'Partner Check-in');
+          const presenceOnly = notificationsRes.data.filter((n: any) => n.type === 'Presence' || n.type === 'Partner Check-in' || n.type === 'Ritual Completed');
           setPresenceNotifications(presenceOnly);
         }
       } catch (e) {
@@ -343,7 +343,11 @@ export const PresenceStrip: React.FC<PresenceStripProps> = ({ onRedirect }) => {
                         }
                         if (n.type === 'Partner Check-in') {
                           setIsSheetOpen(false);
-                          if (onRedirect) onRedirect('Partner Check-in');
+                          if (onRedirect) onRedirect('Partner Check-in', partner);
+                        }
+                        if (n.type === 'Ritual Completed') {
+                          setIsSheetOpen(false);
+                          if (onRedirect) onRedirect('Ritual Completed', partner);
                         }
                       }}
                     >

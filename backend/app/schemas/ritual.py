@@ -39,6 +39,8 @@ class RitualHistoryItem(BaseModel):
     partner_name: Optional[str] = None
     time: Optional[str] = None
     time_name: Optional[str] = None
+    created_at: Optional[str] = None
+    is_hidden: Optional[bool] = False
 
 class RitualHistoryResponse(BaseModel):
     data: List[RitualHistoryItem]

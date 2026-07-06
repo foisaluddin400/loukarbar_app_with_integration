@@ -44,6 +44,26 @@ async def get_history(page: int = Query(1, ge=1), limit: int = Query(30, ge=1), 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/partner-history", response_model=RitualHistoryResponse, status_code=status.HTTP_200_OK)
+async def get_partner_history(page: int = Query(1, ge=1), limit: int = Query(30, ge=1), timezone: str = Query("UTC"), current_user: dict = Depends(get_current_user)):
+    try:
+        result = await streak_system.get_partner_history(current_user["id"], page, limit, timezone)
+        return RitualHistoryResponse(**result)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.patch("/{ritual_id}/visibility", status_code=status.HTTP_200_OK)
+async def update_ritual_visibility(ritual_id: str, action: str = Query(..., description="hide, unhide, or delete"), current_user: dict = Depends(get_current_user)):
+    try:
+        success = await streak_system.update_ritual_visibility(current_user["id"], ritual_id, action)
+        if not success:
+            raise HTTPException(status_code=404, detail="Ritual not found or not modified")
+        return {"success": True, "message": f"Ritual {action} successful"}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.patch("/{ritual_id}", response_model=RitualUpdateResponse, status_code=status.HTTP_200_OK)
 async def update_ritual(
     ritual_id: str,
