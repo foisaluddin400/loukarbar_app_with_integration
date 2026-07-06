@@ -29,7 +29,7 @@ class VibeCardService:
         conn = await self.vibe_connections.find_one({"user_id": user_id, "partner_id": partner_id})
         if not conn or conn.get("status") != "active": return None
 
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timezone
         import zoneinfo
         try:
             tz = zoneinfo.ZoneInfo(tz_str)
@@ -38,43 +38,58 @@ class VibeCardService:
             
         now_utc = datetime.now(timezone.utc)
         now_local = now_utc.astimezone(tz)
-        logical_today = (now_local - timedelta(hours=4)).date()
+        
+        # 1. Midnight Rollover (00:00 local time)
+        logical_today = now_local.date()
         logical_today_str = logical_today.isoformat()
 
-        if conn.get("stalled_since"): return conn
         if conn.get("current_journey_day", 1) >= 90: return conn
-
-        last_update_str = conn.get("last_journey_day_update_date")
-        if last_update_str == logical_today_str: return conn
-
-        # Needs update
-        last_ans = await self.user_answers.find_one(
-            {"user_id": user_id, "partner_id": partner_id},
-            sort=[("created_at", -1)]
-        )
         
-        base_time_utc = last_ans["created_at"] if last_ans and "created_at" in last_ans else conn.get("connected_at", now_utc)
-        if base_time_utc.tzinfo is None:
-            base_time_utc = base_time_utc.replace(tzinfo=timezone.utc)
-        base_time_local = base_time_utc.astimezone(tz)
-        logical_base_date = (base_time_local - timedelta(hours=4)).date()
-
-        delta_days = (logical_today - logical_base_date).days
+        current_day = conn.get("current_journey_day", 1)
         
-        if delta_days > 0 or not last_update_str:
-            new_day = conn.get("current_journey_day", 1) + max(1, delta_days)
-            new_day = min(new_day, 90)
+        # 2. Calculate true calendar day (target_day)
+        connected_at = conn.get("connected_at", now_utc)
+        if connected_at.tzinfo is None:
+            connected_at = connected_at.replace(tzinfo=timezone.utc)
+        start_date = connected_at.astimezone(tz).date()
+        
+        target_day = (logical_today - start_date).days + 1
+        
+        # 3. Catch-up Logic: Advance day by day if unblocked
+        while current_day < target_day:
+            # If explicitly stalled by submit_answers
+            if conn.get("stalled_since"):
+                break
+                
+            # Check if current_day has an anchor
+            cursor = self.vibe_90day_cards.find({"day": current_day})
+            cards = await cursor.to_list(length=None)
+            has_anchor = any(c.get("is_anchor", False) for c in cards)
+            
+            if has_anchor:
+                # BOTH users must have submitted answers for this anchor day
+                my_ans = await self.user_answers.find_one({"user_id": user_id, "partner_id": partner_id, "journey_day": current_day})
+                pa_ans = await self.user_answers.find_one({"user_id": partner_id, "partner_id": user_id, "journey_day": current_day})
+                
+                if not my_ans or not pa_ans:
+                    break # Cannot advance past an uncompleted anchor
+                    
+            # Unblocked! Advance to next day
+            current_day += 1
+
+        # 4. Save progress if advanced
+        if current_day != conn.get("current_journey_day"):
             await self.vibe_connections.update_many(
                 {"$or": [
                     {"user_id": user_id, "partner_id": partner_id},
                     {"user_id": partner_id, "partner_id": user_id}
                 ]},
                 {"$set": {
-                    "current_journey_day": new_day,
+                    "current_journey_day": current_day,
                     "last_journey_day_update_date": logical_today_str
                 }}
             )
-            conn["current_journey_day"] = new_day
+            conn["current_journey_day"] = current_day
             conn["last_journey_day_update_date"] = logical_today_str
             
         return conn

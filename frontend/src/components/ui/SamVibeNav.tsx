@@ -139,8 +139,10 @@ const SamVibeNav: React.FC<SamVibeNavProps> = ({ onPartnerChange }) => {
         return Math.abs(gestureState.dy) > 10 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx);
       },
       onPanResponderRelease: (_, gestureState) => {
-        if (gestureState.dy > 30 || gestureState.dy < -30) {
-          switchToAligned();
+        if (gestureState.dy > 30) {
+          switchToAligned('down');
+        } else if (gestureState.dy < -30) {
+          switchToAligned('up');
         }
       },
     })

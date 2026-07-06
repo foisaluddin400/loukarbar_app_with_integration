@@ -35,8 +35,10 @@ const AlignedNav: React.FC = () => {
         return Math.abs(gestureState.dy) > 10 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx);
       },
       onPanResponderRelease: (_, gestureState) => {
-        if (gestureState.dy > 30 || gestureState.dy < -30) {
-          switchToVibeCheck();
+        if (gestureState.dy > 30) {
+          switchToVibeCheck('down');
+        } else if (gestureState.dy < -30) {
+          switchToVibeCheck('up');
         }
       },
     })

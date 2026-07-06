@@ -14,7 +14,7 @@ type Nav = StackNavigationProp<RootStackParamList>;
 export function useModeSwitcher() {
   const nav = useNavigation<Nav>();
 
-  const switchToAligned = async () => {
+  const switchToAligned = async (direction?: 'up' | 'down') => {
     try {
       const token = await AsyncStorage.getItem('access_token');
       if (!token) {
@@ -23,7 +23,7 @@ export function useModeSwitcher() {
       }
       const user = await getMe();
       if (user.is_aligned || user.partner || user.secret_key) {
-        nav.navigate('AlignedApp');
+        nav.navigate('AlignedApp' as any, { direction });
       } else {
         nav.navigate('AlignedOnboarding');
       }
@@ -37,7 +37,7 @@ export function useModeSwitcher() {
     }
   };
 
-  const switchToVibeCheck = async () => {
+  const switchToVibeCheck = async (direction?: 'up' | 'down') => {
     try {
       const token = await AsyncStorage.getItem('access_token');
       if (!token) {
@@ -46,7 +46,7 @@ export function useModeSwitcher() {
       }
       const status = await checkVibeStatus();
       if (status.success) {
-        nav.navigate('VibeApp');
+        nav.navigate('VibeApp' as any, { direction });
       } else {
         nav.navigate('VibeOnboarding');
       }
