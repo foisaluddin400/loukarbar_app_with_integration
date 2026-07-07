@@ -105,16 +105,28 @@ class AuthService:
 
     async def signup(self, payload: SignupRequest) -> Dict[str, Any]:
         email = payload.email.lower()
+        password_hash = hash_password(payload.password)
+        otp = "".join(random.choices(string.digits, k=6))
         
         # Check existing user
         existing = await self.collection.find_one({"email": email})
         if existing:
-            raise ValueError("Email already registered")
+            if existing.get("is_verified"):
+                raise ValueError("Email already registered")
             
-        password_hash = hash_password(payload.password)
-        # Generate 6-digit OTP
-        otp = "".join(random.choices(string.digits, k=6))
-        
+            # Seamless Flow: User exists but is unverified. 
+            # Update their password and generate a new OTP.
+            await self.collection.update_one(
+                {"_id": existing["_id"]},
+                {"$set": {
+                    "password_hash": password_hash,
+                    "otp": otp
+                }}
+            )
+            existing["id"] = str(existing["_id"])
+            send_otp_email(email, otp, subject="Verify your email - Loukarver")
+            return existing
+            
         # Generate unique secret key for relationship
         secret_key = await relationship_service.generate_unique_secret_key()
         

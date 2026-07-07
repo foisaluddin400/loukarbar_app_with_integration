@@ -12,11 +12,13 @@ import { forgotPassword } from '../services/authApi';
 const ForgotPassword = () => {
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
+  const [errorText, setErrorText] = useState('');
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
 
   const handleForgot = async () => {
+    setErrorText('');
     if (!email) {
-      Alert.alert('Missing Field', 'Please enter your email address.');
+      setErrorText('Please enter your email address.');
       return;
     }
     try {
@@ -25,17 +27,10 @@ const ForgotPassword = () => {
       navigation.navigate('ResetPassword', { email });
     } catch (error: any) {
       const errorMessage = error.response?.data?.detail || error.message || 'An error occurred.';
-      if (error.response?.status === 404 || errorMessage.toLowerCase().includes('account not found')) {
-         Alert.alert(
-           'Account Not Found', 
-           'No account exists with this email address. Would you like to create a new account?',
-           [
-             { text: 'Try Again', style: 'cancel' },
-             { text: 'Sign Up', onPress: () => navigation.navigate('Signup' as any) }
-           ]
-         );
+      if (error.response?.status === 404 || errorMessage.toLowerCase().includes('not found')) {
+         setErrorText('No account exists with this email address.');
       } else {
-         Alert.alert('Request Failed', errorMessage);
+         setErrorText(errorMessage);
       }
     } finally {
       setLoading(false);
@@ -45,6 +40,13 @@ const ForgotPassword = () => {
   return (
     <SafeAreaView style={styles.safe}>
       <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+        
+        <Pressable onPress={() => navigation.goBack()} style={{ alignSelf: 'flex-start', paddingBottom: 16 }}>
+          <AppText color={Colors.muted} variant="smallCaps">
+            ← Back
+          </AppText>
+        </Pressable>
+
         <View style={styles.content}>
           <AppText variant="smallCaps" color={Colors.accent} style={{ marginBottom: 14 }}>
             RECOVERY
@@ -67,6 +69,11 @@ const ForgotPassword = () => {
             autoComplete="email"
             textContentType="emailAddress"
           />
+          {!!errorText && (
+            <AppText color={Colors.accent} style={{ marginTop: 8, fontSize: 13 }}>
+              {errorText}
+            </AppText>
+          )}
         </View>
 
         <View style={styles.actions}>

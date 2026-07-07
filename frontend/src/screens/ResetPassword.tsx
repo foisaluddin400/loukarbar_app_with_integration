@@ -9,19 +9,23 @@ import { AppTextInput } from '../components/ui/AppTextInput';
 import { RootStackParamList } from '../types';
 import { resetPassword } from '../services/authApi';
 
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
 type ResetPasswordRouteProp = RouteProp<RootStackParamList, 'ResetPassword'>;
 
 const ResetPassword = () => {
   const [otp, setOtp] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [errorText, setErrorText] = useState('');
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
   const route = useRoute<ResetPasswordRouteProp>();
   const email = route.params.email;
 
   const handleReset = async () => {
+    setErrorText('');
     if (!otp || !newPassword) {
-      Alert.alert('Missing Fields', 'Please enter the reset code and your new password.');
+      setErrorText('Please enter the reset code and your new password.');
       return;
     }
     try {
@@ -32,7 +36,7 @@ const ResetPassword = () => {
       navigation.navigate('ModeSelector');
     } catch (error: any) {
       const errorMessage = error.response?.data?.detail || error.message || 'Reset failed.';
-      Alert.alert('Reset Failed', errorMessage);
+      setErrorText(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -41,6 +45,13 @@ const ResetPassword = () => {
   return (
     <SafeAreaView style={styles.safe}>
       <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+        
+        <Pressable onPress={() => navigation.goBack()} style={{ alignSelf: 'flex-start', paddingBottom: 16 }}>
+          <AppText color={Colors.muted} variant="smallCaps">
+            ← Back
+          </AppText>
+        </Pressable>
+
         <View style={styles.content}>
           <AppText variant="smallCaps" color={Colors.accent} style={{ marginBottom: 14 }}>
             SECURE YOUR ACCOUNT
@@ -72,6 +83,12 @@ const ResetPassword = () => {
               isPassword
             />
           </View>
+          
+          {!!errorText && (
+            <AppText color={Colors.accent} style={{ marginTop: 12, fontSize: 13 }}>
+              {errorText}
+            </AppText>
+          )}
         </View>
 
         <View style={styles.actions}>
