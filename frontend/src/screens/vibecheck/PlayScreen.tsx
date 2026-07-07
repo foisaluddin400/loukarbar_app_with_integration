@@ -911,13 +911,7 @@ export const PlayScreen: React.FC = () => {
             View History
           </AppButton>
 
-          <View style={{ backgroundColor: 'black', padding: 10, margin: 10 }}>
-            <AppText style={{ color: 'white', fontSize: 10 }}>
-              DEBUG: currentPId: {partnerId} | limitReached: {limitReached ? "yes" : "no"} | cardsAnsweredToday: {cardsAnsweredToday} | dailyCardsLen: {dailyCards.length} | localIndex: {localIndex} | err: {debugText} | hasCard: {card ? "yes" : "no"} | activeParts: {activePartners.length} 
-            </AppText>
-          </View>
 
-          <AppText style={{ color: 'red', textAlign: 'center', marginTop: 20 }}>{debugText}</AppText>
 
           <View style={{ height: 80 }} />
         </View>

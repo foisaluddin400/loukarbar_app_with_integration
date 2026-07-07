@@ -206,13 +206,11 @@ class VibeCardService:
         my_ans = await self.user_answers.find_one({"user_id": user_id, "partner_id": partner_id, "journey_day": current_day})
         pa_ans = await self.user_answers.find_one({"user_id": partner_id, "partner_id": user_id, "journey_day": current_day})
         
-        if not my_ans: return []
-        
         cards_data = await self.get_daily_questions(user_id, partner_id, tz_str)
         questions = cards_data["questions"]
         q_map = {q["id"]: q for q in questions}
         
-        my_map = {a["question_id"]: a["selected_option"] for a in my_ans.get("answers", [])}
+        my_map = {a["question_id"]: a["selected_option"] for a in my_ans.get("answers", [])} if my_ans else {}
         pa_map = {a["question_id"]: a["selected_option"] for a in pa_ans.get("answers", [])} if pa_ans else {}
         
         my_ans_time = my_ans.get("created_at").isoformat() if my_ans and "created_at" in my_ans else None
