@@ -79,7 +79,7 @@ class VibeDateService:
         
         return await self._map_date(date_doc, payload.timezone)
 
-    async def get_dates(self, user_id: str, user_timezone: str = "UTC", page: int = 1, size: int = 20) -> tuple[List[Dict[str, Any]], int]:
+    async def get_dates(self, user_id: str, user_timezone: str = "UTC", page: int = 1, size: int = 20, partner_id: Optional[str] = None) -> tuple[List[Dict[str, Any]], int]:
         query = {
             "$and": [
                 {"$or": [{"proposer_id": user_id}, {"partner_id": user_id}]},
@@ -87,6 +87,9 @@ class VibeDateService:
                 {"deleted_by": {"$ne": user_id}}
             ]
         }
+        if partner_id:
+            query["$and"].append({"$or": [{"proposer_id": partner_id}, {"partner_id": partner_id}]})
+            
         skip = (page - 1) * size
         
         cursor = self.dates.find(query).sort("updated_at", -1).skip(skip).limit(size)
@@ -96,14 +99,19 @@ class VibeDateService:
         results = [await self._map_date(d, user_timezone) for d in docs]
         return results, total
 
-    async def get_pending_dates_count(self, user_id: str) -> int:
+    async def get_pending_dates_count(self, user_id: str, partner_id: Optional[str] = None) -> int:
         query = {
-            "$or": [{"proposer_id": user_id}, {"partner_id": user_id}],
-            "status": {"$in": [DateStatus.PENDING, DateStatus.PROPOSED_CHANGES]},
-            "last_updated_by": {"$ne": user_id},
-            "seen_by": {"$ne": user_id},
-            "deleted_by": {"$ne": user_id}
+            "$and": [
+                {"$or": [{"proposer_id": user_id}, {"partner_id": user_id}]},
+                {"status": {"$in": [DateStatus.PENDING, DateStatus.PROPOSED_CHANGES]}},
+                {"last_updated_by": {"$ne": user_id}},
+                {"seen_by": {"$ne": user_id}},
+                {"deleted_by": {"$ne": user_id}}
+            ]
         }
+        if partner_id:
+            query["$and"].append({"$or": [{"proposer_id": partner_id}, {"partner_id": partner_id}]})
+            
         return await self.dates.count_documents(query)
 
     async def mark_dates_seen(self, user_id: str) -> None:

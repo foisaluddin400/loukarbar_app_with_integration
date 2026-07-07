@@ -142,8 +142,9 @@ async def get_vibe_results(
 
 @router.get("/streak", response_model=VibeStreakResponse)
 async def get_vibe_streak(
+    partner_id: Optional[str] = Query(None),
     timezone: str = Query("UTC"),
     current_user: dict = Depends(get_current_user)
 ):
     """Get your current Vibe Card answering streak."""
-    return await vibe_card_service.get_streak(current_user["id"], timezone)
+    return await vibe_card_service.get_streak(current_user["id"], partner_id, timezone)

@@ -5,8 +5,9 @@ export const proposeVibeDate = async (payload) => {
   return response.data;
 };
 
-export const listVibeDates = async (page = 1, size = 20, timezone = 'UTC') => {
+export const listVibeDates = async (partner_id, page = 1, size = 20, timezone = 'UTC') => {
   const params = new URLSearchParams({ page, size, timezone });
+  if (partner_id) params.append('partner_id', partner_id);
   const response = await api.get(`/vibedates?${params.toString()}`);
   return response.data;
 };

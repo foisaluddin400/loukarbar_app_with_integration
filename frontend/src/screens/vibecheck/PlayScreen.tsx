@@ -92,21 +92,17 @@ export const PlayScreen: React.FC = () => {
 
   useEffect(() => {
     async function loadData() {
+      setLoading(true);
+      setDailyCards([]);
+      setMatchRate(0);
+      setStreak(0);
+      setAllResults([]);
+      
       try {
-        const [profile, streakData, connsData, datesRes] = await Promise.all([
+        const [profile, connsData] = await Promise.all([
           getVibeProfile().catch(() => null),
-          getVibeStreak().catch(() => ({ current_streak: 0, cards_answered_today: 0 })),
-          getConnections().catch(() => ({ data: [] })),
-          listVibeDates(1, 100, Intl.DateTimeFormat().resolvedOptions().timeZone).catch(() => null)
+          getConnections().catch(() => ({ data: [] }))
         ]);
-
-        if (datesRes?.data) {
-           const upcoming = datesRes.data.filter((d: any) => d.status === "accepted" && new Date(`${d.date}T${d.time}`) >= new Date());
-           if (upcoming.length > 0) {
-               upcoming.sort((a: any, b: any) => new Date(`${a.date}T${a.time}`).getTime() - new Date(`${b.date}T${b.time}`).getTime());
-               setUpcomingDate(new Date(`${upcoming[0].date}T${upcoming[0].time}`));
-           }
-        }
 
         const allPartners = connsData?.data || [];
         if (profile) setMyUserId(profile.user_id);
@@ -125,21 +121,27 @@ export const PlayScreen: React.FC = () => {
             setPartnerId(currentPId);
           }
 
-          const [dailyData, resultsData] = await Promise.all([
+          const [dailyData, resultsData, streakData, datesRes] = await Promise.all([
             getDailyCards(currentPId).catch((e: any) => {
-              console.log("Error in getDailyCards:", e);
-              setDebugText("DailyCards Error: " + (e.message || String(e)));
               return { questions: [] };
             }),
             getVibeResults(currentPId).catch((e: any) => {
-              console.log("Error in getVibeResults:", e);
-              setDebugText(prev => prev + " | Results Error: " + (e.message || String(e)));
               return { data: [] };
-            })
+            }),
+            getVibeStreak(currentPId).catch(() => ({ current_streak: 0, cards_answered_today: 0 })),
+            listVibeDates(currentPId, 1, 100, Intl.DateTimeFormat().resolvedOptions().timeZone).catch(() => null)
           ]);
           
-          if (!dailyData?.questions || dailyData.questions.length === 0) {
-              setDebugText(prev => prev + " | Info: dailyData.questions is empty");
+          if (datesRes?.data) {
+             const upcoming = datesRes.data.filter((d: any) => d.status === "accepted" && new Date(`${d.date}T${d.time}`) >= new Date());
+             if (upcoming.length > 0) {
+                 upcoming.sort((a: any, b: any) => new Date(`${a.date}T${a.time}`).getTime() - new Date(`${b.date}T${b.time}`).getTime());
+                 setUpcomingDate(new Date(`${upcoming[0].date}T${upcoming[0].time}`));
+             } else {
+                 setUpcomingDate(null);
+             }
+          } else {
+             setUpcomingDate(null);
           }
           
           setAllResults(resultsData?.data || []);
@@ -149,7 +151,6 @@ export const PlayScreen: React.FC = () => {
           if (currentPartnerResult) {
              setMatchRate(currentPartnerResult.cumulative_match_percent || 0);
              
-             // Count how many of today's cards I have answered
              if (dailyData?.questions) {
                  partnerCardsAnsweredToday = dailyData.questions.filter((q: any) => 
                      currentPartnerResult.matched_answers?.some((a: any) => a.question_id === q.id && a.my_selected_option)
@@ -158,7 +159,6 @@ export const PlayScreen: React.FC = () => {
           }
           setCardsAnsweredToday(partnerCardsAnsweredToday);
           
-          // Pre-populate myPick and theirPick if I've already answered the current card today
           if (dailyData?.questions?.length > 0 && currentPartnerResult) {
              const firstUnansweredIndex = partnerCardsAnsweredToday < 3 ? partnerCardsAnsweredToday : 2;
              const cardToPrePopulate = dailyData.questions[firstUnansweredIndex]?.id;
@@ -172,13 +172,19 @@ export const PlayScreen: React.FC = () => {
                      setTheirPick(null);
                      setRevealed(false);
                  }
+             } else {
+                 setMyPick(null);
+                 setTheirPick(null);
+                 setRevealed(false);
              }
+          } else {
+             setMyPick(null);
+             setTheirPick(null);
+             setRevealed(false);
           }
           setDailyCards(dailyData?.questions || []);
-          
+          setStreak(streakData?.current_streak || 0);
         }
-        
-        setStreak(streakData?.current_streak || 0);
       } catch (err) {
         console.log("Error loading PlayScreen data:", err);
       } finally {
@@ -793,7 +799,7 @@ export const PlayScreen: React.FC = () => {
               })()}
               {revealed && (
                 <View style={{ marginBottom: 24, gap: 12 }}>
-                  {activePartners.map((partner) => {
+                  {activePartners.filter(p => p.user_id === partnerId).map((partner) => {
                       const pPickData = allResults
                         .map((r: any) => {
                           const matchedAns = r.matched_answers?.find((a: any) => a.question_id === card.id);

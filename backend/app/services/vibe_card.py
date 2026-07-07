@@ -293,12 +293,16 @@ class VibeCardService:
             "both_finished": both_finished
         }]
 
-    async def get_streak(self, user_id: str, user_timezone: str = "UTC") -> Dict[str, Any]:
+    async def get_streak(self, user_id: str, partner_id: Optional[str] = None, user_timezone: str = "UTC") -> Dict[str, Any]:
         # Find active connection
-        conn = await self.vibe_connections.find_one({
+        query = {
             "$or": [{"user_id": user_id}, {"partner_id": user_id}],
             "status": "active"
-        })
+        }
+        if partner_id:
+            query["$and"] = [{"$or": [{"user_id": partner_id}, {"partner_id": partner_id}]}]
+            
+        conn = await self.vibe_connections.find_one(query)
         
         if not conn:
             return {"current_streak": 0, "last_answered": None, "cards_answered_today": 0}

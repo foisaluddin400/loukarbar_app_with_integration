@@ -855,17 +855,17 @@ class VibeCheckService:
         )
         return {"success": True, "message": "Connection restored."}
 
-    async def get_sync_summary(self, user_id: str, timezone_str: str = "UTC") -> Dict[str, Any]:
+    async def get_sync_summary(self, user_id: str, timezone_str: str = "UTC", partner_id: Optional[str] = None) -> Dict[str, Any]:
         """Calculates the combined Sync score for the user and their partner."""
         # 1. Find partner
         profile = await self.get_profile(user_id)
         if not profile:
             raise ValueError("VibeCheck profile not found.")
             
-        partner_id = None
-        conn = await self.connections.find_one({"user_id": user_id})
-        if conn:
-            partner_id = conn["partner_id"]
+        if not partner_id:
+            conn = await self.connections.find_one({"user_id": user_id})
+            if conn:
+                partner_id = conn["partner_id"]
             
         user_ids = [user_id]
         if partner_id:

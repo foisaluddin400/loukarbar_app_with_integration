@@ -127,6 +127,7 @@ export const VCDatesScreen: React.FC = () => {
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
+      setDates([]); // Clear previous state to prevent old data from flashing
       const profile = await getVibeProfile().catch(() => null);
       let currentPartnerId = partnerId;
 
@@ -145,9 +146,11 @@ export const VCDatesScreen: React.FC = () => {
         }
       }
 
-      const res = await listVibeDates(1, 100, getTimezone()).catch(() => null);
-      if (res?.data) {
-        setDates(res.data);
+      if (currentPartnerId) {
+        const res = await listVibeDates(currentPartnerId, 1, 100, getTimezone()).catch(() => null);
+        if (res?.data) {
+          setDates(res.data);
+        }
       }
       
       // Mark dates as seen so the badge clears when user views this screen

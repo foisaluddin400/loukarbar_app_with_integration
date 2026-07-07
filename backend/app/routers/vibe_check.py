@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query
 from fastapi.responses import FileResponse
 from typing import List, Optional
 import os
@@ -288,10 +288,10 @@ async def scan_qr_from_image(
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/sync-summary", response_model=SyncSummaryResponse)
-async def get_sync_summary(timezone: str = "UTC", current_user: dict = Depends(get_current_user)):
+async def get_sync_summary(partner_id: Optional[str] = Query(None), timezone: str = "UTC", current_user: dict = Depends(get_current_user)):
     """Get the combined sync score and breakdown for the user and their partner."""
     try:
-        return await vibe_check_service.get_sync_summary(current_user["id"], timezone)
+        return await vibe_check_service.get_sync_summary(current_user["id"], timezone, partner_id=partner_id)
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:

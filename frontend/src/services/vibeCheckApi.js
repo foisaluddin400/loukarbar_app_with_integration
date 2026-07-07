@@ -198,23 +198,27 @@ export const getVibeResults = async (partner_id, timezone = "UTC") => {
   return response.data;
 };
 
-export const getVibeStreak = async (timezone = "UTC") => {
+export const getVibeStreak = async (partner_id, timezone = "UTC") => {
   const params = new URLSearchParams({ timezone });
+  if (partner_id) params.append("partner_id", partner_id);
   const response = await api.get(`/vibecheck/cards/streak?${params.toString()}`);
   return response.data;
 };
 
 // ─── Sync Summary ─────────────────────────────────────────────
 
-export const getSyncSummary = async (timezone = "UTC") => {
+export const getSyncSummary = async (partner_id, timezone = "UTC") => {
   const params = new URLSearchParams({ timezone, _t: Date.now().toString() });
+  if (partner_id) params.append("partner_id", partner_id);
   const response = await api.get(`/vibecheck/sync-summary?${params.toString()}`);
   return response.data;
 };
 
 // ─── Vibe Dates ─────────────────────────────────────────────
 
-export const getPendingDatesCount = async () => {
-  const response = await api.get(`/vibedates/pending-count?_t=${Date.now()}`);
+export const getPendingDatesCount = async (partner_id) => {
+  let url = `/vibedates/pending-count?_t=${Date.now()}`;
+  if (partner_id) url += `&partner_id=${partner_id}`;
+  const response = await api.get(url);
   return response.data;
 };

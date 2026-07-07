@@ -118,6 +118,7 @@ const SamVibeNav: React.FC<SamVibeNavProps> = ({ onPartnerChange }) => {
 
   // Active connection index (which connection is selected)
   const [activeIdx, setActiveIdx] = useState(0);
+  const [expandedOptionsIdx, setExpandedOptionsIdx] = useState<number | null>(null);
 
   const [notifPage, setNotifPage] = useState(1);
   const [notifHasMore, setNotifHasMore] = useState(true);
@@ -1244,15 +1245,29 @@ const SamVibeNav: React.FC<SamVibeNavProps> = ({ onPartnerChange }) => {
                     )}
                   </View>
                   {i === activeIdx && (
-                    <View style={styles.activeTag}>
-                      <AppText variant="mono" style={{ color: "#fff", fontSize: 12 }}>
-                        ACTIVE
-                      </AppText>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                      <View style={styles.activeTag}>
+                        <AppText variant="mono" style={{ color: "#fff", fontSize: 12 }}>
+                          ACTIVE
+                        </AppText>
+                      </View>
+                      <Pressable
+                        style={{ padding: 6, borderRadius: 16, backgroundColor: expandedOptionsIdx === i ? 'rgba(255,255,255,0.1)' : 'transparent' }}
+                        onPress={() => {
+                          setExpandedOptionsIdx(expandedOptionsIdx === i ? null : i);
+                        }}
+                      >
+                        <Ionicons 
+                          name={expandedOptionsIdx === i ? "chevron-up" : "chevron-down"} 
+                          size={18} 
+                          color={expandedOptionsIdx === i ? Colors.white : Colors.muted} 
+                        />
+                      </Pressable>
                     </View>
                   )}
                 </Pressable>
                 
-                {i === activeIdx && conn.user_id && (
+                {i === activeIdx && expandedOptionsIdx === i && conn.user_id && (
                   <View style={{ flexDirection: 'row', borderTopWidth: 1, borderColor: '#333' }}>
                     <Pressable 
                       style={{ flex: 1, paddingVertical: 12, alignItems: 'center', borderRightWidth: 1, borderColor: '#333' }}

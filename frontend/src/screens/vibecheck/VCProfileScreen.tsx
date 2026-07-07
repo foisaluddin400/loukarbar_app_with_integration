@@ -223,8 +223,8 @@ export const VCProfileScreen: React.FC = () => {
     }
   };
 
-  const handleConnect = async (keyToUse?: string) => {
-    const finalKey = (keyToUse || connectKey).trim();
+  const handleConnect = async (keyToUse?: string | any) => {
+    const finalKey = (typeof keyToUse === 'string' ? keyToUse : connectKey).trim();
     if (!finalKey) {
       CustomAlert.alert('Missing Key', 'Please enter a Vibe Key.');
       return;

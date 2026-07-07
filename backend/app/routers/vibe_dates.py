@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from typing import List
+from typing import List, Optional
 from app.routers.auth import get_current_user
 from app.schemas.vibe_dates import (
     VibeDateCreate, VibeDateUpdate, VibeDateResponse, 
@@ -21,6 +21,7 @@ async def propose_vibe_date(payload: VibeDateCreate, current_user: dict = Depend
 
 @router.get("", response_model=VibeDateListResponse)
 async def list_vibe_dates(
+    partner_id: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
     timezone: str = Query("UTC"),
@@ -28,7 +29,7 @@ async def list_vibe_dates(
 ):
     """List all date proposals sent or received with pagination."""
     try:
-        dates, total = await vibe_date_service.get_dates(current_user["id"], timezone, page, size)
+        dates, total = await vibe_date_service.get_dates(current_user["id"], timezone, page, size, partner_id=partner_id)
         return {
             "success": True, 
             "data": dates, 
@@ -62,10 +63,13 @@ async def list_hidden_vibe_dates(
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/pending-count")
-async def get_pending_dates_count(current_user: dict = Depends(get_current_user)):
-    """Get the count of dates that require the user's attention."""
+async def get_pending_dates_count(
+    partner_id: Optional[str] = Query(None),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get count of unread/pending dates received by current user."""
     try:
-        count = await vibe_date_service.get_pending_dates_count(current_user["id"])
+        count = await vibe_date_service.get_pending_dates_count(current_user["id"], partner_id)
         return {"success": True, "count": count}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

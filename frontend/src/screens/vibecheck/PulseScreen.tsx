@@ -85,6 +85,19 @@ export const PulseScreen: React.FC = () => {
   // Removed getVibeProfile useEffect because SamVibeNav handles initial fetch and fires onPartnerChange
 
   const loadPulseData = async (pid: string) => {
+    // Clear previous data
+    setMyStage(-1);
+    setTheirStage(-1);
+    setIsAligned(false);
+    setAlignedMessage(null);
+    setAnalytics({
+      partner_id: '', partner_name: '', overall_match_percentage: 0,
+      total_cards_played: 0, total_matches: 0, timeline: [], by_depth: [], by_category: [],
+      key_agreements: [], key_disagreements: [], strongest_category: null, divergent_category: null
+    });
+    setFlags([]);
+    setPartnerFlags([]);
+
     try {
       const pulseRes = await getVibePulseStatus(pid);
       if (pulseRes) {

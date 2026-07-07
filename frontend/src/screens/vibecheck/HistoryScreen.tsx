@@ -40,8 +40,12 @@ export const HistoryScreen: React.FC = () => {
        return;
     }
     
-    if (pageNum === 1) setLoading(true);
-    else setLoadingMore(true);
+    if (pageNum === 1) {
+      setLoading(true);
+      if (!append) setHistory([]);
+    } else {
+      setLoadingMore(true);
+    }
 
     try {
       const res = await getVibeCardHistory(currentPartnerId, activeFilter, search, pageNum, 10);

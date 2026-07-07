@@ -11,6 +11,7 @@ import { PlayScreen } from '../screens/vibecheck/PlayScreen';
 import { VCDatesScreen } from '../screens/vibecheck/VCDatesScreen';
 import { HistoryScreen } from '../screens/vibecheck/HistoryScreen';
 import { PulseScreen } from '../screens/vibecheck/PulseScreen';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const Tab = createBottomTabNavigator<VibeTabParamList>();
 
@@ -27,7 +28,8 @@ export function VibeTabs() {
 
   const fetchPendingDates = async () => {
     try {
-      const res = await getPendingDatesCount();
+      const pid = await AsyncStorage.getItem('@vibe_active_partner');
+      const res = await getPendingDatesCount(pid || undefined);
       if (res?.success) setPendingDatesCount(res.count);
     } catch (e) {
       console.log('Failed to fetch pending dates count', e);
