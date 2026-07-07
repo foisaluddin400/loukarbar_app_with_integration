@@ -20,7 +20,13 @@
       "package": "com.foisaldev.alignedrn"
     },
     "plugins": [
-      "expo-font"
+      "expo-font",
+      [
+        "onesignal-expo-plugin",
+        {
+          "mode": "development"
+        }
+      ]
     ],
     "extra": {
       "eas": {

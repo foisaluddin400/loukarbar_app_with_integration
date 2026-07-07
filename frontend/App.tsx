@@ -6,6 +6,16 @@ import { useFonts } from 'expo-font';
 import { ActivityIndicator, View } from 'react-native';
 import RootNavigator from './src/navigation/RootNavigator';
 import { Colors } from './src/constants/colors';
+import { CustomAlert } from './src/components/ui/CustomAlert';
+
+import { OneSignal } from 'react-native-onesignal';
+
+// OneSignal Initialization
+const ONE_SIGNAL_APP_ID = process.env.EXPO_PUBLIC_ONESIGNAL_APP_ID;
+if (ONE_SIGNAL_APP_ID) {
+  OneSignal.initialize(ONE_SIGNAL_APP_ID);
+  OneSignal.Notifications.requestPermission(true);
+}
 
 export default function App() {
   const [fontsLoaded] = useFonts({
@@ -29,6 +39,7 @@ export default function App() {
       <SafeAreaProvider>
         <StatusBar style="dark" backgroundColor={Colors.bone} />
         <RootNavigator />
+        <CustomAlert />
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

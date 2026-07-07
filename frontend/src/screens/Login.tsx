@@ -32,6 +32,17 @@ const Login = () => {
       await AsyncStorage.setItem('access_token', data.access_token);
       await AsyncStorage.setItem('refresh_token', data.refresh_token);
 
+      try {
+        const { getMe } = require('../../services/authApi');
+        const user = await getMe();
+        if (user && user.id) {
+          const { OneSignal } = require('react-native-onesignal');
+          OneSignal.login(user.id);
+        }
+      } catch (e) {
+        console.log("Failed to login to OneSignal", e);
+      }
+
       const returnTo = route.params?.returnTo;
       navigation.navigate('ModeSelector', { autoSelect: returnTo });
     } catch (error: any) {

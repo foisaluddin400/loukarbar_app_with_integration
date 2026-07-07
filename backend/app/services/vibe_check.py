@@ -145,6 +145,25 @@ class VibeCheckService:
 
         return await self.get_profile(user_id)
 
+    async def update_settings(self, user_id: str, payload: VibeCheckProfileUpdate) -> Dict[str, Any]:
+        """Update VibeCheck settings such as vibe_key_enabled."""
+        now = datetime.now(timezone.utc)
+        existing = await self.profiles.find_one({"user_id": user_id})
+        if not existing:
+            raise ValueError("VibeCheck profile not found.")
+            
+        update_data = {"updated_at": now}
+        if payload.name is not None:
+            update_data["name"] = payload.name
+        if payload.vibe_key_enabled is not None:
+            update_data["vibe_key_enabled"] = payload.vibe_key_enabled
+            
+        await self.profiles.update_one(
+            {"user_id": user_id},
+            {"$set": update_data}
+        )
+        return await self.get_profile(user_id)
+
     async def update_profile_picture(self, user_id: str, file_path: str) -> Dict[str, Any]:
         """Update the user's VibeCheck profile picture."""
         # Convert local path to an accessible URL path (assuming StaticFiles mounted at /uploads)
@@ -224,6 +243,9 @@ class VibeCheckService:
         if not target:
             raise ValueError("User with this Vibe Key not found.")
             
+        if not target.get("vibe_key_enabled", True):
+            raise ValueError("This user has disabled new connections via Vibe Key.")
+            
         if target["user_id"] == user_id:
             raise ValueError("You cannot connect with yourself.")
 
@@ -250,27 +272,62 @@ class VibeCheckService:
         if reverse_request:
             raise ValueError(f"{target['name']} has already sent you a request. Please approve it from your requests panel.")
 
-        # 6. Create the connection request
-        await self.requests.insert_one({
-            "sender_id": user_id,
-            "sender_name": initiator["name"],
-            "recipient_id": target["user_id"],
-            "created_at": now
-        })
+        from pymongo.errors import DuplicateKeyError
+        try:
+            res = await self.requests.insert_one({
+                "sender_id": user_id,
+                "sender_name": initiator["name"],
+                "recipient_id": target["user_id"],
+                "recipient_name": target["name"],
+                "created_at": now
+            })
+            request_id = str(res.inserted_id)
+        except DuplicateKeyError:
+            raise ValueError(f"You have already sent a request to {target['name']}.")
+
+        from app.services.notification import notification_service
+        from app.schemas.notification import NotificationCreate, NotificationType
+        
+        await notification_service.schedule_notification(
+            sender_id=initiator["user_id"],
+            payload=NotificationCreate(
+                recipient_id=target["user_id"],
+                title="New Vibe Check Request",
+                message=f"{initiator['name']} wants to connect with you on VibeCheck! Tap to accept or reject.",
+                type=NotificationType.VIBE_SYSTEM,
+                metadata={
+                    "type": "vibe_check_request",
+                    "request_id": request_id,
+                    "sender_id": initiator["user_id"],
+                    "sender_name": initiator["name"],
+                    "sender_picture": initiator.get("profile_picture")
+                }
+            )
+        )
 
         return {"success": True, "message": f"Connection request sent to {target['name']}!"}
 
     async def get_pending_requests(self, user_id: str) -> List[Dict[str, Any]]:
-        """List all pending connection requests for this user."""
-        cursor = self.requests.find({"recipient_id": user_id})
+        """List all pending connection requests for this user (incoming and outgoing)."""
+        cursor = self.requests.find({
+            "$or": [
+                {"recipient_id": user_id},
+                {"sender_id": user_id}
+            ]
+        })
         docs = await cursor.to_list(length=None)
         
         results = []
         for d in docs:
+            direction = "incoming" if d["recipient_id"] == user_id else "outgoing"
             results.append({
                 "request_id": str(d["_id"]),
                 "sender_id": d["sender_id"],
                 "sender_name": d["sender_name"],
+                "recipient_id": d["recipient_id"],
+                "recipient_name": d.get("recipient_name", "Unknown"),
+                "type": d.get("type"),
+                "direction": direction,
                 "created_at": d["created_at"]
             })
         return results
@@ -313,6 +370,35 @@ class VibeCheckService:
                 upsert=True
             )
             message = "Connection accepted."
+            
+            # Send Push Notification and WebSocket event to the original sender
+            from app.services.notification import notification_service
+            from app.schemas.notification import NotificationCreate, NotificationType
+            from app.core.websocket import ws_manager
+            
+            # Find the recipient's profile to get their name
+            recipient_profile = await self.profiles.find_one({"user_id": user_id})
+            recipient_name = recipient_profile.get("name", "Someone") if recipient_profile else "Someone"
+
+            await notification_service.schedule_notification(
+                sender_id=user_id,
+                payload=NotificationCreate(
+                    recipient_id=request["sender_id"],
+                    title="Request Accepted!",
+                    message=f"{recipient_name} accept your vibe connection",
+                    type=NotificationType.VIBE_SYSTEM,
+                    metadata={
+                        "type": "vibe_check_accepted",
+                        "partner_id": user_id
+                    }
+                )
+            )
+            
+            await ws_manager.broadcast_to_user(
+                request["sender_id"], 
+                {"type": "VIBE_CONNECTION_UPDATED"}
+            )
+            
         else:
             message = "Connection request rejected."
 
@@ -322,12 +408,172 @@ class VibeCheckService:
         return {"success": True, "message": message}
 
     async def delete_connection(self, user_id: str, partner_id: str) -> bool:
-        """Remove a mutual connection between two users."""
-        # A -> B
+        """Remove a mutual connection between two users and wipe all associated data."""
         res1 = await self.connections.delete_one({"user_id": user_id, "partner_id": partner_id})
-        # B -> A
         res2 = await self.connections.delete_one({"user_id": partner_id, "partner_id": user_id})
-        return res1.deleted_count > 0 or res2.deleted_count > 0
+        
+        if res1.deleted_count > 0 or res2.deleted_count > 0:
+            # Wipe all data exactly like reset
+            flags_coll = self.db["vibe_flags"]
+            await flags_coll.delete_many({"user_id": user_id, "target_id": partner_id})
+            await flags_coll.delete_many({"user_id": partner_id, "target_id": user_id})
+            
+            pulse_coll = self.db["vibe_pulse"]
+            await pulse_coll.delete_many({"user_id": user_id, "partner_id": partner_id})
+            await pulse_coll.delete_many({"user_id": partner_id, "partner_id": user_id})
+            
+            dates_coll = self.db["vibe_dates"]
+            await dates_coll.delete_many({"$or": [
+                {"proposer_id": user_id, "partner_id": partner_id},
+                {"proposer_id": partner_id, "partner_id": user_id}
+            ]})
+            
+            answers_coll = self.db["vibe_user_answers"]
+            await answers_coll.delete_many({"user_id": user_id, "partner_id": partner_id})
+            await answers_coll.delete_many({"user_id": partner_id, "partner_id": user_id})
+            
+            scores_coll = self.db["vibe_cumulative_scores"]
+            await scores_coll.delete_many({"user_id": user_id, "partner_id": partner_id})
+            await scores_coll.delete_many({"user_id": partner_id, "partner_id": user_id})
+            
+            # Send Notification to partner
+            from app.services.notification import notification_service
+            from app.schemas.notification import NotificationCreate, NotificationType
+            from app.core.websocket import ws_manager
+            
+            initiator_profile = await self.get_profile(user_id)
+            initiator_name = initiator_profile["name"] if initiator_profile else "Someone"
+            
+            await notification_service.schedule_notification(
+                sender_id=user_id,
+                payload=NotificationCreate(
+                    recipient_id=partner_id,
+                    title="Connection Broken",
+                    message=f"{initiator_name} is breaking your vibe connection",
+                    type=NotificationType.VIBE_SYSTEM,
+                    metadata={"type": "vibe_check_connection_broken"}
+                )
+            )
+            
+            # Broadcast to both users to wipe local cache
+            await ws_manager.broadcast_to_user(user_id, {"type": "VIBE_CONNECTION_UPDATED"})
+            await ws_manager.broadcast_to_user(partner_id, {"type": "VIBE_CONNECTION_UPDATED"})
+            
+            return True
+            
+        return False
+
+    async def request_reset_connection(self, user_id: str, partner_id: str) -> Dict[str, Any]:
+        """Send a reset request to the partner."""
+        conn = await self.connections.find_one({"user_id": user_id, "partner_id": partner_id})
+        if not conn:
+            raise ValueError("Connection not found.")
+            
+        initiator = await self.get_profile(user_id)
+        
+        req = {
+            "$set": {
+                "sender_name": initiator["name"],
+                "type": "reset_connection",
+                "created_at": datetime.now(timezone.utc)
+            }
+        }
+        # Use upsert to handle potential race conditions from button mashing
+        await self.requests.update_one(
+            {
+                "sender_id": user_id,
+                "recipient_id": partner_id
+            },
+            req,
+            upsert=True
+        )
+        
+        from app.services.notification import notification_service
+        from app.schemas.notification import NotificationCreate, NotificationType
+        from app.core.websocket import ws_manager
+        
+        await notification_service.schedule_notification(
+            sender_id=user_id,
+            payload=NotificationCreate(
+                recipient_id=partner_id,
+                title="Connection Reset Request",
+                message=f"{initiator['name']} wants to reset your Vibe journey to Day 1.",
+                type=NotificationType.VIBE_SYSTEM,
+                metadata={
+                    "type": "vibe_check_reset_request",
+                    "request_id": str(res.inserted_id)
+                }
+            )
+        )
+        
+        await ws_manager.broadcast_to_user(partner_id, {"type": "NEW_NOTIFICATION"})
+        
+        return {"success": True, "message": "Reset request sent."}
+
+    async def respond_reset_connection(self, user_id: str, request_id: str, accept: bool) -> Dict[str, Any]:
+        req = await self.requests.find_one({"_id": ObjectId(request_id), "recipient_id": user_id, "type": "reset_connection"})
+        if not req:
+            raise ValueError("Reset request not found.")
+            
+        if accept:
+            partner_id = req["sender_id"]
+            now = datetime.now(timezone.utc)
+            update = {"$set": {"current_journey_day": 1, "connected_at": now}}
+            await self.connections.update_one({"user_id": user_id, "partner_id": partner_id}, update)
+            await self.connections.update_one({"user_id": partner_id, "partner_id": user_id}, update)
+            
+            flags_coll = self.db["vibe_flags"]
+            await flags_coll.delete_many({"user_id": user_id, "target_id": partner_id})
+            await flags_coll.delete_many({"user_id": partner_id, "target_id": user_id})
+            
+            pulse_coll = self.db["vibe_pulse"]
+            await pulse_coll.update_one(
+                {"user_id": user_id, "partner_id": partner_id},
+                {"$set": {"status": "TALKING", "updated_at": now}}
+            )
+            await pulse_coll.update_one(
+                {"user_id": partner_id, "partner_id": user_id},
+                {"$set": {"status": "TALKING", "updated_at": now}}
+            )
+            
+            dates_coll = self.db["vibe_dates"]
+            await dates_coll.delete_many({"$or": [
+                {"proposer_id": user_id, "partner_id": partner_id},
+                {"proposer_id": partner_id, "partner_id": user_id}
+            ]})
+            
+            answers_coll = self.db["vibe_user_answers"]
+            await answers_coll.delete_many({"user_id": user_id, "partner_id": partner_id})
+            await answers_coll.delete_many({"user_id": partner_id, "partner_id": user_id})
+            
+            scores_coll = self.db["vibe_cumulative_scores"]
+            await scores_coll.delete_many({"user_id": user_id, "partner_id": partner_id})
+            await scores_coll.delete_many({"user_id": partner_id, "partner_id": user_id})
+            
+            message = "Connection reset successfully."
+            
+            from app.services.notification import notification_service
+            from app.schemas.notification import NotificationCreate, NotificationType
+            from app.core.websocket import ws_manager
+            
+            recipient_profile = await self.get_profile(user_id)
+            await notification_service.schedule_notification(
+                sender_id=user_id,
+                payload=NotificationCreate(
+                    recipient_id=partner_id,
+                    title="Reset Accepted",
+                    message=f"{recipient_profile['name']} accepted the reset. Welcome to Day 1!",
+                    type=NotificationType.VIBE_SYSTEM,
+                    metadata={"type": "vibe_check_reset_accepted", "partner_id": user_id}
+                )
+            )
+            await ws_manager.broadcast_to_user(partner_id, {"type": "VIBE_CONNECTION_UPDATED"})
+            
+        else:
+            message = "Reset request rejected."
+            
+        await self.requests.delete_one({"_id": ObjectId(request_id)})
+        return {"success": True, "message": message}
 
     async def regenerate_vibe_key(self, user_id: str) -> str:
         """Generate a new unique vibe key for the user."""

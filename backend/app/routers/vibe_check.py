@@ -9,12 +9,11 @@ from app.schemas.vibe_check import (
     VibeCheckProfileCreate, VibeCheckProfileUpdate, VibeCheckProfileResponse, VibeCheckGenericResponse,
     VibeCheckConnectRequest, VibeCheckConnectionsResponse, VibeCheckRequestsResponse,
     VibeCheckRespondRequest, VibeInviteResponse, VibeInviteValidateResponse,
-    VibeInviteAcceptRequest, VibeInviteAcceptResponse, SyncSummaryResponse
+    VibeInviteAcceptRequest, VibeInviteAcceptResponse, SyncSummaryResponse,
+    VibeCheckPasswordRequest, VibeCheckResetRespondRequest
 )
 from app.services.vibe_check import vibe_check_service
-import os
-import shutil
-import uuid
+from app.services.auth import verify_password
 
 router = APIRouter(prefix="/vibecheck", tags=["VibeCheck"])
 
@@ -58,43 +57,19 @@ async def get_vibecheck_profile(current_user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="VibeCheck profile not setup yet.")
     return profile
 
-@router.post("/profile/picture", response_model=VibeCheckProfileResponse)
-async def upload_vibe_photo(file: UploadFile = File(...), current_user: dict = Depends(get_current_user)):
-    """Uploads a profile photo for the authenticated user's VibeCheck profile."""
-    try:
-        os.makedirs("uploads/vibe_profiles", exist_ok=True)
-        ext = os.path.splitext(file.filename)[1]
-        if not ext:
-            ext = ".jpg"
-        filename = f"{uuid.uuid4().hex}{ext}"
-        file_path = os.path.join("uploads", "vibe_profiles", filename)
-        
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-            
-        updated = await vibe_check_service.update_profile_picture(current_user["id"], file_path)
-        return updated
-    except ValueError as ve:
-        raise HTTPException(status_code=400, detail=str(ve))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.delete("/profile/picture", response_model=VibeCheckProfileResponse)
-async def delete_vibe_photo(current_user: dict = Depends(get_current_user)):
-    """Deletes the authenticated user's VibeCheck profile picture."""
-    try:
-        updated = await vibe_check_service.delete_profile_picture(current_user["id"])
-        return updated
-    except ValueError as ve:
-        raise HTTPException(status_code=400, detail=str(ve))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
 @router.post("/setup", response_model=VibeCheckProfileResponse)
 async def setup_vibecheck_profile(payload: VibeCheckProfileCreate, current_user: dict = Depends(get_current_user)):
     """Setup or update the user's VibeCheck profile."""
     try:
         return await vibe_check_service.create_or_update_profile(current_user["id"], payload)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.patch("/settings", response_model=VibeCheckProfileResponse)
+async def update_vibecheck_settings(payload: VibeCheckProfileUpdate, current_user: dict = Depends(get_current_user)):
+    """Update VibeCheck settings (like vibe_key_enabled)."""
+    try:
+        return await vibe_check_service.update_settings(current_user["id"], payload)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -140,14 +115,54 @@ async def respond_vibecheck_request(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.delete("/connection/{partner_id}", response_model=VibeCheckGenericResponse)
-async def delete_vibecheck_connection(partner_id: str, current_user: dict = Depends(get_current_user)):
-    """Remove a connection from your VibeCheck network."""
+@router.post("/connection/{partner_id}/break", response_model=VibeCheckGenericResponse)
+async def break_vibecheck_connection(
+    partner_id: str, 
+    payload: VibeCheckPasswordRequest, 
+    current_user: dict = Depends(get_current_user)
+):
+    """Remove a connection from your VibeCheck network (requires password)."""
     try:
-        success = await vibe_check_service.delete_connection(current_user["id"], partner_id)
-        if not success:
-            raise HTTPException(status_code=404, detail="Connection not found.")
-        return {"success": True, "message": "Connection removed successfully."}
+        if not verify_password(payload.password, current_user.get("password_hash", "")):
+            raise HTTPException(status_code=401, detail="Invalid password.")
+        
+        from app.services.vibe_check import vibe_check_service
+        result = await vibe_check_service.delete_connection(current_user["id"], partner_id)
+        if not result:
+            raise HTTPException(status_code=404, detail="Connection not found")
+        return {"success": True, "message": "Connection broken"}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@router.post("/connection/{partner_id}/reset/request")
+async def request_reset_connection(
+    partner_id: str, 
+    payload: VibeCheckPasswordRequest, 
+    current_user: dict = Depends(get_current_user)
+):
+    """Send a reset request to your partner (requires password)."""
+    try:
+        if not verify_password(payload.password, current_user.get("password_hash", "")):
+            raise HTTPException(status_code=401, detail="Invalid password.")
+            
+        return await vibe_check_service.request_reset_connection(current_user["id"], partner_id)
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/connection/{request_id}/reset/respond", response_model=VibeCheckGenericResponse)
+async def respond_reset_vibecheck_connection(
+    request_id: str, 
+    payload: VibeCheckResetRespondRequest, 
+    current_user: dict = Depends(get_current_user)
+):
+    """Accept or reject a connection reset request."""
+    try:
+        return await vibe_check_service.respond_reset_connection(current_user["id"], request_id, payload.accept)
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

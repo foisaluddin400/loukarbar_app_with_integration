@@ -19,6 +19,11 @@ export const setupVibeProfile = async (name) => {
   return response.data;
 };
 
+export const updateVibeSettings = async (settings) => {
+  const response = await api.patch('/vibecheck/settings', settings);
+  return response.data;
+};
+
 // ─── Invite System ────────────────────────────────────────────
 
 export const generateInvite = async () => {
@@ -62,6 +67,21 @@ export const respondToRequest = async (request_id, accept) => {
 
 export const deleteConnection = async (partner_id) => {
   const response = await api.delete(`/vibecheck/connection/${partner_id}`);
+  return response.data;
+};
+
+export const breakConnection = async (partner_id, password) => {
+  const response = await api.post(`/vibecheck/connection/${partner_id}/break`, { password });
+  return response.data;
+};
+
+export const requestResetConnection = async (partner_id, password) => {
+  const response = await api.post(`/vibecheck/connection/${partner_id}/reset/request`, { password });
+  return response.data;
+};
+
+export const respondResetConnection = async (request_id, accept) => {
+  const response = await api.post(`/vibecheck/connection/${request_id}/reset/respond`, { accept });
   return response.data;
 };
 

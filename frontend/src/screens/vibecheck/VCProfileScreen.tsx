@@ -8,6 +8,9 @@ import {
   Image,
   ActivityIndicator,
   Platform,
+  Switch,
+  Modal,
+  DeviceEventEmitter,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -18,16 +21,20 @@ import { AppText } from '../../components/ui/AppText';
 import { AppButton } from '../../components/ui/AppButton';
 import { AppTextInput } from '../../components/ui/AppTextInput';
 import { BottomSheet } from '../../components/ui/BottomSheet';
+import { CustomAlert } from '../../components/ui/CustomAlert';
 import { RootStackParamList } from '../../types';
 import {
   getVibeProfile,
   updateVibeProfile,
+  updateVibeSettings,
   uploadProfilePicture,
   deleteVibeProfile,
   regenerateKey,
   getConnections,
   restoreConnection,
   connectWithKey,
+  getRequests,
+  respondToRequest,
 } from '../../services/vibeCheckApi';
 import { signoutUser } from '../../services/authApi';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -80,19 +87,23 @@ export const VCProfileScreen: React.FC = () => {
   // Sign out confirmation
   const [signoutSheet, setSignoutSheet] = useState(false);
 
-  // Connections
+  // Connections & Requests
   const [connectionsSheet, setConnectionsSheet] = useState(false);
+  const [connectionsTab, setConnectionsTab] = useState<'active' | 'requests'>('active');
   const [connections, setConnections] = useState<any[]>([]);
+  const [requests, setRequests] = useState<any[]>([]);
 
   const fetchProfile = async () => {
     try {
       setLoading(true);
-      const [data, connData] = await Promise.all([
+      const [data, connData, reqData] = await Promise.all([
          getVibeProfile(),
-         getConnections()
+         getConnections(),
+         getRequests()
       ]);
       setProfile(data);
       if (connData?.data) setConnections(connData.data);
+      if (reqData?.data) setRequests(reqData.data);
     } catch (error) {
       console.log('Error fetching vibe profile:', error);
     } finally {
@@ -112,7 +123,7 @@ export const VCProfileScreen: React.FC = () => {
 
   const handleUpdateName = async () => {
     if (!editName.trim()) {
-      Alert.alert('Missing Name', 'Please enter a name.');
+      CustomAlert.alert('Missing Name', 'Please enter a name.');
       return;
     }
     try {
@@ -120,10 +131,10 @@ export const VCProfileScreen: React.FC = () => {
       const updated = await updateVibeProfile(editName.trim());
       setProfile(updated);
       setEditSheet(false);
-      Alert.alert('Updated', 'Your name has been updated.');
+      CustomAlert.alert('Updated', 'Your name has been updated.');
     } catch (error: any) {
       const msg = error.response?.data?.detail || error.message || 'Failed to update.';
-      Alert.alert('Error', msg);
+      CustomAlert.alert('Error', msg);
     } finally {
       setSaving(false);
     }
@@ -143,10 +154,10 @@ export const VCProfileScreen: React.FC = () => {
         const updated = await uploadProfilePicture(result.assets[0].uri);
         setProfile(updated);
         setPictureSheet(false);
-        Alert.alert('Uploaded', 'Profile picture updated.');
+        CustomAlert.alert('Uploaded', 'Profile picture updated.');
       } catch (error: any) {
         const msg = error.response?.data?.detail || error.message || 'Upload failed.';
-        Alert.alert('Error', msg);
+        CustomAlert.alert('Error', msg);
       } finally {
         setUploading(false);
       }
@@ -159,10 +170,10 @@ export const VCProfileScreen: React.FC = () => {
       await deleteProfilePicture();
       setProfile((prev: any) => ({ ...prev, profile_picture: null }));
       setPictureSheet(false);
-      Alert.alert('Removed', 'Profile picture removed.');
+      CustomAlert.alert('Removed', 'Profile picture removed.');
     } catch (error: any) {
       const msg = error.response?.data?.detail || error.message || 'Failed to remove.';
-      Alert.alert('Error', msg);
+      CustomAlert.alert('Error', msg);
     } finally {
       setUploading(false);
     }
@@ -172,11 +183,11 @@ export const VCProfileScreen: React.FC = () => {
     const doRegenerate = async () => {
       try {
         const result = await regenerateKey();
-        Alert.alert('Done', result.message);
+        CustomAlert.alert('Done', result.message);
         fetchProfile();
       } catch (error: any) {
         const msg = error.response?.data?.detail || error.message || 'Failed.';
-        Alert.alert('Error', msg);
+        CustomAlert.alert('Error', msg);
       }
     };
 
@@ -185,7 +196,7 @@ export const VCProfileScreen: React.FC = () => {
         doRegenerate();
       }
     } else {
-      Alert.alert(
+      CustomAlert.alert(
         'Regenerate Key?',
         'Your current Vibe Key will stop working. Anyone trying to connect with the old key won\'t be able to.',
         [
@@ -199,24 +210,60 @@ export const VCProfileScreen: React.FC = () => {
   const handleCopyKey = async () => {
     if (!profile?.vibe_key) return;
     await Clipboard.setStringAsync(profile.vibe_key);
-    Alert.alert('Copied', 'Vibe Key copied to clipboard.');
+    CustomAlert.alert('Copied', 'Vibe Key copied to clipboard.');
   };
 
-  const handleConnect = async () => {
-    if (!connectKey.trim()) {
-      Alert.alert('Missing Key', 'Please enter a Vibe Key.');
+  const handleToggleVibeKey = async (value: boolean) => {
+    try {
+      const updated = await updateVibeSettings({ vibe_key_enabled: value });
+      setProfile((prev: any) => ({ ...prev, vibe_key_enabled: updated.vibe_key_enabled }));
+    } catch (error: any) {
+      const msg = error.response?.data?.detail || error.message || 'Failed to update settings.';
+      CustomAlert.alert('Error', msg);
+    }
+  };
+
+  const handleConnect = async (keyToUse?: string) => {
+    const finalKey = (keyToUse || connectKey).trim();
+    if (!finalKey) {
+      CustomAlert.alert('Missing Key', 'Please enter a Vibe Key.');
       return;
     }
     try {
       setConnecting(true);
-      await connectWithKey(connectKey.trim());
+      await connectWithKey(finalKey);
       setConnectKey('');
-      Alert.alert('Request Sent', 'A connection request has been sent.');
+      CustomAlert.alert('Request Sent', 'A connection request has been sent.');
     } catch (error: any) {
       const msg = error.response?.data?.detail || error.message || 'Failed to connect.';
-      Alert.alert('Error', msg);
+      CustomAlert.alert('Error', msg);
     } finally {
       setConnecting(false);
+    }
+  };
+
+  const handleRestoreConnection = async (partnerId: string) => {
+    try {
+      await restoreConnection(partnerId);
+      fetchProfile();
+      CustomAlert.alert('Restored', 'Connection restored successfully.');
+    } catch (error: any) {
+      const msg = error.response?.data?.detail || error.message || 'Failed to restore.';
+      CustomAlert.alert('Error', msg);
+    }
+  };
+
+  const handleRespondRequest = async (requestId: string, accept: boolean) => {
+    try {
+      setLoading(true);
+      await respondToRequest(requestId, accept);
+      CustomAlert.alert(accept ? 'Accepted' : 'Rejected', accept ? 'Connection request accepted!' : 'Connection request rejected.');
+      fetchProfile();
+    } catch (error: any) {
+      const msg = error.response?.data?.detail || error.message || 'Failed to respond to request.';
+      CustomAlert.alert('Error', msg);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -224,7 +271,7 @@ export const VCProfileScreen: React.FC = () => {
     setScannerSheet(false);
     setConnectKey(data);
     setTimeout(() => {
-       handleConnect();
+       handleConnect(data);
     }, 500); 
   };
 
@@ -245,12 +292,12 @@ export const VCProfileScreen: React.FC = () => {
                 document.body.removeChild(link);
                 window.URL.revokeObjectURL(url);
               })
-              .catch(() => Alert.alert('Error', 'Failed to download QR code.'));
+              .catch(() => CustomAlert.alert('Error', 'Failed to download QR code.'));
           } else {
-            Alert.alert('Notice', 'Mobile download is temporarily disabled for testing.');
+            CustomAlert.alert('Notice', 'Mobile download is temporarily disabled for testing.');
           }
         } catch (e: any) {
-          Alert.alert('Error', 'Failed to save or share QR code.');
+          CustomAlert.alert('Error', 'Failed to save or share QR code.');
         }
       });
     }
@@ -261,12 +308,12 @@ export const VCProfileScreen: React.FC = () => {
       setDeleting(true);
       await deleteVibeProfile();
       setDeleteSheet(false);
-      Alert.alert('Deleted', 'Your VibeCheck profile has been permanently deleted.', [
+      CustomAlert.alert('Deleted', 'Your VibeCheck profile has been permanently deleted.', [
         { text: 'OK', onPress: () => nav.reset({ index: 0, routes: [{ name: 'ModeSelector' }] }) },
       ]);
     } catch (error: any) {
       const msg = error.response?.data?.detail || error.message || 'Failed to delete.';
-      Alert.alert('Error', msg);
+      CustomAlert.alert('Error', msg);
     } finally {
       setDeleting(false);
     }
@@ -279,23 +326,13 @@ export const VCProfileScreen: React.FC = () => {
       await AsyncStorage.multiRemove(['access_token', 'refresh_token']);
       nav.reset({ index: 0, routes: [{ name: route }] });
     } catch (e) {
-       Alert.alert('Error', 'Failed to sign out locally.');
+       CustomAlert.alert('Error', 'Failed to sign out locally.');
        setLoading(false);
     }
   };
 
   const handleSignout = () => {
     setSignoutSheet(true);
-  };
-
-  const handleRestoreConnection = async (partnerId: string) => {
-    try {
-      await restoreConnection(partnerId);
-      Alert.alert("Restored", "Connection has been restored.");
-      fetchProfile();
-    } catch (e: any) {
-      Alert.alert("Error", e.message || "Failed to restore connection.");
-    }
   };
 
   // ─── Render ────────────────────────────────────────────────
@@ -365,24 +402,41 @@ export const VCProfileScreen: React.FC = () => {
 
         <View style={styles.inner}>
           {/* Vibe Key Card */}
-          <View style={styles.keyCard}>
-            <AppText variant="smallCaps" color={Colors.muted} style={{ marginBottom: 8 }}>
-              YOUR VIBE KEY
-            </AppText>
-            <AppText variant="display" size={22} color={Colors.accent} style={{ letterSpacing: 2 }}>
+          <View style={[styles.keyCard, profile.vibe_key_enabled === false && { opacity: 0.6 }]}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <AppText variant="smallCaps" color={Colors.muted}>
+                YOUR VIBE KEY
+              </AppText>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <AppText size={12} color={Colors.muted}>
+                  {profile.vibe_key_enabled === false ? 'Disabled' : 'Enabled'}
+                </AppText>
+                <Switch 
+                  value={profile.vibe_key_enabled !== false} 
+                  onValueChange={handleToggleVibeKey} 
+                  trackColor={{ false: '#333', true: Colors.accent }}
+                  thumbColor={Colors.bone}
+                  style={{ transform: [{ scale: 0.7 }] }}
+                />
+              </View>
+            </View>
+            
+            <AppText variant="display" size={22} color={Colors.accent} style={{ letterSpacing: 2, textDecorationLine: profile.vibe_key_enabled === false ? 'line-through' : 'none' }}>
               {profile.vibe_key}
             </AppText>
             <AppText variant="serifItalic" size={13} color={Colors.muted} style={{ marginTop: 8, lineHeight: 20 }}>
-              Share this key with people so they can connect with you.
+              {profile.vibe_key_enabled === false 
+                ? "Your Vibe Key is disabled. No one can use it to connect with you."
+                : "Share this key with people so they can connect with you."}
             </AppText>
             <View style={{ flexDirection: 'row', gap: 8, marginTop: 14 }}>
-              <AppButton variant="solid" size="sm" style={{ flex: 1, backgroundColor: '#1C1C1E' }} onPress={handleCopyKey}>
+              <AppButton variant="solid" size="sm" style={{ flex: 1, backgroundColor: '#1C1C1E' }} onPress={handleCopyKey} disabled={profile.vibe_key_enabled === false}>
                 COPY KEY
               </AppButton>
-              <AppButton variant="outline" size="sm" style={{ flex: 1 }} onPress={() => setQrSheet(true)}>
+              <AppButton variant="outline" size="sm" style={{ flex: 1 }} onPress={() => setQrSheet(true)} disabled={profile.vibe_key_enabled === false}>
                 SHOW QR
               </AppButton>
-              <AppButton variant="outline" size="sm" style={{ flex: 1 }} onPress={handleRegenerateKey}>
+              <AppButton variant="outline" size="sm" style={{ flex: 1 }} onPress={handleRegenerateKey} disabled={profile.vibe_key_enabled === false}>
                 REGENERATE
               </AppButton>
             </View>
@@ -667,32 +721,90 @@ export const VCProfileScreen: React.FC = () => {
         kicker="NETWORK"
         title="Your Connections"
       >
-        <ScrollView style={{ maxHeight: 400 }}>
-          {connections.length === 0 ? (
-            <AppText color={Colors.muted} style={{ textAlign: 'center', marginTop: 20 }}>
-              No connections found.
+        <View style={{ flexDirection: 'row', marginBottom: 16, backgroundColor: '#EAE2D4', borderRadius: 8, padding: 4 }}>
+          <Pressable 
+            style={{ flex: 1, paddingVertical: 8, alignItems: 'center', backgroundColor: connectionsTab === 'active' ? Colors.bone : 'transparent', borderRadius: 6 }}
+            onPress={() => setConnectionsTab('active')}
+          >
+            <AppText variant="smallCaps" color={connectionsTab === 'active' ? Colors.ink : Colors.muted}>Active</AppText>
+          </Pressable>
+          <Pressable 
+            style={{ flex: 1, paddingVertical: 8, alignItems: 'center', backgroundColor: connectionsTab === 'requests' ? Colors.bone : 'transparent', borderRadius: 6 }}
+            onPress={() => setConnectionsTab('requests')}
+          >
+            <AppText variant="smallCaps" color={connectionsTab === 'requests' ? Colors.ink : Colors.muted}>
+              Requests {requests.length > 0 ? `(${requests.length})` : ''}
             </AppText>
-          ) : (
-            connections.map((conn, idx) => {
-              const isReleased = conn.status === "released";
-              return (
-                <View key={idx} style={[styles.menuItem, { backgroundColor: isReleased ? `${Colors.cream}50` : Colors.cream }]}>
-                  <View style={{ flex: 1 }}>
-                    <AppText variant="heading" size={17} color={isReleased ? Colors.muted : Colors.ink}>
-                      {conn.partner_name || conn.partner_id}
-                    </AppText>
-                    <AppText variant="mono" color={Colors.muted} style={{ fontSize: 10, marginTop: 2 }}>
-                      {isReleased ? "RELEASED" : `ACTIVE • DAY ${conn.current_journey_day || 1}`}
-                    </AppText>
+          </Pressable>
+        </View>
+
+        <ScrollView style={{ maxHeight: 400 }}>
+          {connectionsTab === 'active' ? (
+            connections.length === 0 ? (
+              <AppText color={Colors.muted} style={{ textAlign: 'center', marginTop: 20 }}>
+                No connections found.
+              </AppText>
+            ) : (
+              connections.map((conn, idx) => {
+                const isReleased = conn.status === "released";
+                return (
+                  <View key={`conn-${idx}`} style={[styles.menuItem, { backgroundColor: isReleased ? `${Colors.cream}50` : Colors.cream }]}>
+                    <View style={{ flex: 1 }}>
+                      <AppText variant="heading" size={17} color={isReleased ? Colors.muted : Colors.ink}>
+                        {conn.partner_name || conn.partner_id}
+                      </AppText>
+                      <AppText variant="mono" color={Colors.muted} style={{ fontSize: 10, marginTop: 2 }}>
+                        {isReleased ? "RELEASED" : `ACTIVE • DAY ${conn.current_journey_day || 1}`}
+                      </AppText>
+                    </View>
+                    {isReleased && (
+                      <AppButton variant="outline" size="sm" onPress={() => handleRestoreConnection(conn.partner_id)}>
+                        RESTORE
+                      </AppButton>
+                    )}
                   </View>
-                  {isReleased && (
-                    <AppButton variant="outline" size="sm" onPress={() => handleRestoreConnection(conn.partner_id)}>
-                      RESTORE
-                    </AppButton>
+                );
+              })
+            )
+          ) : (
+            requests.length === 0 ? (
+              <AppText color={Colors.muted} style={{ textAlign: 'center', marginTop: 20 }}>
+                No pending requests.
+              </AppText>
+            ) : (
+              requests.map((req, idx) => (
+                <View key={`req-${idx}`} style={[styles.menuItem, { backgroundColor: Colors.cream, flexDirection: 'column', alignItems: 'stretch' }]}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+                    <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: Colors.accent, alignItems: 'center', justifyContent: 'center', marginRight: 12 }}>
+                      <AppText color={Colors.bone} size={18}>{req.direction === 'incoming' ? req.sender_name.charAt(0).toUpperCase() : req.recipient_name.charAt(0).toUpperCase()}</AppText>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <AppText variant="heading" size={17} color={Colors.ink}>
+                        {req.direction === 'incoming' ? req.sender_name : req.recipient_name}
+                      </AppText>
+                      <AppText variant="mono" color={Colors.muted} style={{ fontSize: 10, marginTop: 2 }}>
+                        {req.direction === 'incoming' ? 'WANTS TO CONNECT' : 'REQUEST SENT'}
+                      </AppText>
+                    </View>
+                  </View>
+                  {req.direction === 'incoming' && (
+                    <View style={{ flexDirection: 'row', gap: 8 }}>
+                      <AppButton variant="solid" size="sm" style={{ flex: 1, backgroundColor: Colors.ink }} onPress={() => handleRespondRequest(req.request_id, true)}>
+                        ACCEPT
+                      </AppButton>
+                      <AppButton variant="outline" size="sm" style={{ flex: 1 }} onPress={() => handleRespondRequest(req.request_id, false)}>
+                        REJECT
+                      </AppButton>
+                    </View>
+                  )}
+                  {req.direction === 'outgoing' && (
+                    <AppText color={Colors.muted} style={{ textAlign: 'center', fontStyle: 'italic', fontSize: 13 }}>
+                      Waiting for them to accept.
+                    </AppText>
                   )}
                 </View>
-              );
-            })
+              ))
+            )
           )}
         </ScrollView>
       </BottomSheet>
@@ -728,47 +840,61 @@ export const VCProfileScreen: React.FC = () => {
         </View>
       </BottomSheet>
 
-      {/* ==================== SCANNER SHEET ==================== */}
-      <BottomSheet
-        open={scannerSheet}
-        onClose={() => setScannerSheet(false)}
-        kicker="SCAN"
-        title="Scan QR Code"
-        dark
+      {/* ==================== FULL SCREEN SCANNER MODAL ==================== */}
+      <Modal
+        visible={scannerSheet}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setScannerSheet(false)}
       >
-        <View style={{ alignItems: 'center' }}>
-          {Platform.OS !== 'web' ? (
-            permission?.granted ? (
-              <View style={styles.cameraContainer}>
-                <CameraView
-                  style={styles.camera}
-                  onBarcodeScanned={handleBarcodeScanned}
-                  barcodeScannerSettings={{
-                    barcodeTypes: ['qr'],
-                  }}
-                />
-                <View style={styles.scannerOverlay}>
-                  <View style={styles.scannerFrame} />
-                </View>
-              </View>
-            ) : (
-              <View style={[styles.cameraContainer, { justifyContent: 'center', backgroundColor: '#333' }]}>
-                <AppText color="#fff">Camera permission is required.</AppText>
-                <AppButton variant="solid" size="sm" onPress={requestPermission} style={{ marginTop: 16 }}>
-                  Grant Permission
-                </AppButton>
-              </View>
-            )
-          ) : (
-            <View style={[styles.cameraContainer, { justifyContent: 'center', backgroundColor: Colors.bone, padding: 20 }]}>
-              <Ionicons name="camera-outline" size={48} color={Colors.muted} style={{ alignSelf: 'center', marginBottom: 12 }} />
-              <AppText color={Colors.muted} style={{ textAlign: 'center' }}>
-                Live scanning is only available on the mobile app. Please upload a QR code from your gallery.
-              </AppText>
+        <View style={{ flex: 1, backgroundColor: Colors.ink }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', padding: 24, paddingTop: 40 }}>
+            <View>
+              <AppText variant="smallCaps" color={Colors.muted}>SCAN</AppText>
+              <AppText variant="display" size={28} color={Colors.bone}>Scan QR Code</AppText>
             </View>
-          )}
+            <AppButton variant="ghost" size="sm" onPress={() => setScannerSheet(false)} style={{ borderWidth: 1, borderColor: Colors.rule, borderRadius: 30 }}>
+              <AppText color={Colors.bone}>Close</AppText>
+            </AppButton>
+          </View>
+          
+          <View style={{ flex: 1, padding: 24 }}>
+            {Platform.OS !== 'web' ? (
+              permission?.granted ? (
+                <View style={[styles.cameraContainer, { flex: 1, aspectRatio: undefined }]}>
+                  <CameraView
+                    style={styles.camera}
+                    onBarcodeScanned={handleBarcodeScanned}
+                    barcodeScannerSettings={{
+                      barcodeTypes: ['qr'],
+                    }}
+                  />
+                  <View style={styles.scannerOverlay}>
+                    <View style={styles.scannerFrame} />
+                    <AppText color={Colors.bone} style={{ marginTop: 24, textAlign: 'center', opacity: 0.8 }}>
+                      Align the QR code within the frame to scan.
+                    </AppText>
+                  </View>
+                </View>
+              ) : (
+                <View style={[styles.cameraContainer, { flex: 1, aspectRatio: undefined, justifyContent: 'center', backgroundColor: '#333' }]}>
+                  <AppText color="#fff" style={{ textAlign: 'center' }}>Camera permission is required.</AppText>
+                  <AppButton variant="solid" size="sm" onPress={requestPermission} style={{ marginTop: 16, alignSelf: 'center' }}>
+                    Grant Permission
+                  </AppButton>
+                </View>
+              )
+            ) : (
+              <View style={[styles.cameraContainer, { flex: 1, aspectRatio: undefined, justifyContent: 'center', backgroundColor: Colors.bone, padding: 20 }]}>
+                <Ionicons name="camera-outline" size={48} color={Colors.muted} style={{ alignSelf: 'center', marginBottom: 12 }} />
+                <AppText color={Colors.muted} style={{ textAlign: 'center' }}>
+                  Live scanning is only available on the mobile app. Please upload a QR code from your gallery.
+                </AppText>
+              </View>
+            )}
+          </View>
         </View>
-      </BottomSheet>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -890,5 +1016,30 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 12,
     elevation: 5,
+  },
+  cameraContainer: {
+    width: '100%',
+    aspectRatio: 1,
+    borderRadius: 24,
+    overflow: 'hidden',
+    borderWidth: 2,
+    borderColor: '#444',
+    marginTop: 20,
+  },
+  camera: {
+    flex: 1,
+  },
+  scannerOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scannerFrame: {
+    width: 220,
+    height: 220,
+    borderWidth: 2,
+    borderColor: Colors.accent,
+    borderRadius: 16,
+    backgroundColor: 'transparent',
   },
 });

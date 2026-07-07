@@ -14,6 +14,9 @@ class NotificationType(str, Enum):
     PARTNER_CHECKIN = "Partner Check-in"
     RITUAL_COMPLETED = "Ritual Completed"
     RED_FLAG = "Red Flag"
+    GREEN_FLAG = "Green Flag"
+    YELLOW_FLAG = "Yellow Flag"
+    VIBE_SYSTEM = "Vibe System"
 
 class NotificationStatus(str, Enum):
     SCHEDULED = "Scheduled"

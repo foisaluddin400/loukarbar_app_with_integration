@@ -28,10 +28,13 @@ async def list_my_notifications(
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
     timezone: str = Query("UTC"),
+    types: Optional[str] = Query(None, description="Comma-separated list of notification types to filter"),
+    is_hidden: Optional[bool] = Query(None, description="Filter by hidden status"),
     current_user: dict = Depends(get_current_user)
 ):
     """List notifications received by the current user."""
-    data, total, unread_count = await notification_service.get_my_notifications(current_user["id"], page, size, timezone)
+    type_list = [t.strip() for t in types.split(",")] if types else None
+    data, total, unread_count = await notification_service.get_my_notifications(current_user["id"], page, size, timezone, type_list, is_hidden)
     return NotificationPaginatedResponse(success=True, data=data, total=total, unread_count=unread_count, page=page, size=size)
 
 @router.patch("/{notification_id}/seen", response_model=GenericResponse)

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { View, StyleSheet, Pressable, Alert, ActivityIndicator, Image, Platform, PanResponder, FlatList } from "react-native";
+import { View, StyleSheet, Pressable, Alert, ActivityIndicator, Image, Platform, PanResponder, FlatList, TextInput } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
 import { Swipeable } from 'react-native-gesture-handler';
@@ -10,6 +10,7 @@ import { AppText } from "../../components/ui/AppText";
 import { BottomSheet } from "../../components/ui/BottomSheet";
 import { AppButton } from "../../components/ui/AppButton";
 import { AppTextInput } from "../../components/ui/AppTextInput";
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   getVibeProfile,
   getConnections,
@@ -18,11 +19,14 @@ import {
   connectWithKey,
   respondToRequest,
   deleteConnection,
+  breakConnection,
+  requestResetConnection,
+  respondResetConnection,
   regenerateKey,
 } from "../../services/vibeCheckApi";
 import { listVibeDates } from "../../services/vibeDatesApi";
 import { deleteAccount } from "../../services/userApi";
-import { getMyNotifications, markNotificationSeen, markNotificationUnread, deleteNotification, clearAllNotifications } from "../../services/notificationApi";
+import { getMyNotifications, markNotificationSeen, markNotificationUnread, deleteNotification, clearAllNotifications, hideNotification, unhideNotification } from "../../services/notificationApi";
 import * as Clipboard from "expo-clipboard";
 import { DeviceEventEmitter } from "react-native";
 import { useModeSwitcher } from "../../hooks/useModeSwitcher";
@@ -90,6 +94,7 @@ const SamVibeNav: React.FC<SamVibeNavProps> = ({ onPartnerChange }) => {
   const [requestsSheet, setRequestsSheet] = useState(false);
   const [notificationsSheet, setNotificationsSheet] = useState(false);
   const [scannerSheet, setScannerSheet] = useState(false);
+  const [showHiddenNotifs, setShowHiddenNotifs] = useState(false);
   const rowRefs = React.useRef<{[key: string]: any}>({});
   const [permission, requestPermission] = useCameraPermissions();
   const [isDeleteDataOpen, setIsDeleteDataOpen] = useState(false);
@@ -117,6 +122,14 @@ const SamVibeNav: React.FC<SamVibeNavProps> = ({ onPartnerChange }) => {
   const [notifPage, setNotifPage] = useState(1);
   const [notifHasMore, setNotifHasMore] = useState(true);
   const [unreadCount, setUnreadCount] = useState(0);
+
+  // Break / Reset states
+  const [breakSheetPartnerId, setBreakSheetPartnerId] = useState<string | null>(null);
+  const [breakPassword, setBreakPassword] = useState("");
+  const [resetSheetPartnerId, setResetSheetPartnerId] = useState<string | null>(null);
+  const [resetPassword, setResetPassword] = useState("");
+  const [processingBreakReset, setProcessingBreakReset] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   const formatTime = (isoString: string) => {
     if (!isoString) return "";
@@ -155,7 +168,7 @@ const SamVibeNav: React.FC<SamVibeNavProps> = ({ onPartnerChange }) => {
         getVibeProfile().catch(() => null),
         getConnections().catch(() => ({ data: [] })),
         getRequests().catch(() => ({ data: [] })),
-        getMyNotifications(1, 20).catch(() => ({ data: [], unread_count: 0 })),
+        getMyNotifications(1, 20, ["Vibe Date", "VIBE_DATE", "DATE_PROPOSED", "Red Flag", "Green Flag", "Yellow Flag", "Vibe System"], showHiddenNotifs).catch(() => ({ data: [], unread_count: 0 })),
       ]);
       if (profileData) setProfile(profileData);
       
@@ -179,15 +192,26 @@ const SamVibeNav: React.FC<SamVibeNavProps> = ({ onPartnerChange }) => {
           }
       }
       
-      if (conns.length > 0 && onPartnerChange) {
-         onPartnerChange(conns[0].user_id);
+      if (conns.length > 0) {
+         let matchedIdx = 0;
+         const savedPartnerId = await AsyncStorage.getItem('@vibe_active_partner');
+         if (savedPartnerId) {
+             const idx = conns.findIndex(c => c.user_id === savedPartnerId);
+             if (idx !== -1) {
+                 matchedIdx = idx;
+             }
+         }
+         setActiveIdx(matchedIdx);
+         if (onPartnerChange) {
+            onPartnerChange(conns[matchedIdx].user_id);
+         }
       }
     } catch (error) {
       console.log("Error fetching vibe data:", error);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [showHiddenNotifs]);
 
   useEffect(() => {
     fetchData();
@@ -252,11 +276,61 @@ const SamVibeNav: React.FC<SamVibeNavProps> = ({ onPartnerChange }) => {
 
   // ─── Handlers ──────────────────────────────────────────────
 
+  const handleBreakConnection = async () => {
+    if (!breakSheetPartnerId || !breakPassword) {
+      Alert.alert("Error", "Please enter your password.");
+      return;
+    }
+    try {
+      setProcessingBreakReset(true);
+      await breakConnection(breakSheetPartnerId, breakPassword);
+      setBreakSheetPartnerId(null);
+      setBreakPassword("");
+      Alert.alert("Success", "Connection broken successfully.");
+      DeviceEventEmitter.emit("REFRESH_VIBE_DATA");
+    } catch (e: any) {
+      Alert.alert("Error", e.response?.data?.detail || "Could not break connection.");
+    } finally {
+      setProcessingBreakReset(false);
+    }
+  };
+
+  const handleRequestResetConnection = async () => {
+    if (!resetSheetPartnerId || !resetPassword) {
+      Alert.alert("Error", "Please enter your password.");
+      return;
+    }
+    try {
+      setProcessingBreakReset(true);
+      await requestResetConnection(resetSheetPartnerId, resetPassword);
+      setResetSheetPartnerId(null);
+      setResetPassword("");
+      Alert.alert("Request Sent", "A reset request has been sent to your partner.");
+    } catch (e: any) {
+      Alert.alert("Error", e.response?.data?.detail || "Could not request reset.");
+    } finally {
+      setProcessingBreakReset(false);
+    }
+  };
+
+  const handleRespondResetConnection = async (requestId: string, accept: boolean) => {
+    try {
+      setLoading(true);
+      await respondResetConnection(requestId, accept);
+      Alert.alert(accept ? "Accepted" : "Rejected", accept ? "Connection reset to Day 1." : "Reset request rejected.");
+      DeviceEventEmitter.emit("REFRESH_VIBE_DATA");
+    } catch (e: any) {
+      Alert.alert("Error", e.response?.data?.detail || "Failed to respond.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const loadMoreNotifications = async () => {
     if (!notifHasMore || loading) return;
     try {
       const next = notifPage + 1;
-      const notifsData = await getMyNotifications(next, 20).catch(() => ({ data: [], unread_count: unreadCount }));
+      const notifsData = await getMyNotifications(next, 20, ["Vibe Date", "VIBE_DATE", "DATE_PROPOSED", "Red Flag", "Green Flag", "Yellow Flag", "Vibe System"], showHiddenNotifs).catch(() => ({ data: [], unread_count: unreadCount }));
       if (notifsData?.data?.length) {
         setNotifications(prev => [...prev, ...notifsData.data]);
         setNotifPage(next);
@@ -864,20 +938,23 @@ const SamVibeNav: React.FC<SamVibeNavProps> = ({ onPartnerChange }) => {
         noScroll
       >
         <View style={{ flexShrink: 1, marginTop: 10 }}>
-          {notifications.length > 0 && (
-            <View style={{ flexDirection: 'row', justifyContent: 'flex-end', paddingBottom: 16 }}>
-              <Pressable onPress={handleClearAllNotifications}>
-                <AppText color={Colors.accent} size={14}>Clear All</AppText>
-              </Pressable>
-            </View>
-          )}
+          <View style={{ flexDirection: 'row', justifyContent: 'flex-end', paddingBottom: 16, gap: 16 }}>
+             <Pressable onPress={() => setShowHiddenNotifs(!showHiddenNotifs)}>
+                <AppText color={Colors.accent} size={14}>{showHiddenNotifs ? "Back to History" : "Hidden"}</AppText>
+             </Pressable>
+             {notifications.length > 0 && (
+                <Pressable onPress={handleClearAllNotifications}>
+                   <AppText color={Colors.accent} size={14}>Clear All</AppText>
+                </Pressable>
+             )}
+          </View>
           {requests.length === 0 && notifications.length === 0 ? (
             <AppText color={Colors.muted} style={{ textAlign: 'center', marginTop: 20 }}>
               No notifications.
             </AppText>
           ) : (
             <FlatList
-              data={[...requests, ...notifications]}
+              data={[...requests, ...notifications.filter((n: any) => showHiddenNotifs ? n.is_hidden : !n.is_hidden)]}
               keyExtractor={(item) => item.id || item.request_id || Math.random().toString()}
               showsVerticalScrollIndicator={false}
               onEndReached={loadMoreNotifications}
@@ -885,14 +962,27 @@ const SamVibeNav: React.FC<SamVibeNavProps> = ({ onPartnerChange }) => {
               contentContainerStyle={{ paddingBottom: 40 }}
               renderItem={({ item }) => {
                 if (item.sender_name) { // It's a request
+                  if (item.type === "reset_connection") {
+                    return (
+                      <View style={{ backgroundColor: '#fff', padding: 16, borderRadius: 12, borderWidth: 1, borderColor: Colors.rule, marginBottom: 16 }}>
+                        <AppText color={Colors.text} style={{ marginBottom: 12 }}>
+                          <AppText color={Colors.text} style={{ fontWeight: "bold" }}>{item.sender_name}</AppText> wants to reset your Vibe connection to Day 1. All progress will be wiped.
+                        </AppText>
+                        <View style={{ flexDirection: "row", gap: 8 }}>
+                          <AppButton variant="solid" size="sm" style={{ flex: 1, backgroundColor: Colors.ink }} onPress={() => handleRespondResetConnection(item.request_id || item._id, true)}>Accept Reset</AppButton>
+                          <AppButton variant="outline" size="sm" style={{ flex: 1 }} onPress={() => handleRespondResetConnection(item.request_id || item._id, false)}>Decline</AppButton>
+                        </View>
+                      </View>
+                    );
+                  }
                   return (
                     <View style={{ backgroundColor: '#fff', padding: 16, borderRadius: 12, borderWidth: 1, borderColor: Colors.rule, marginBottom: 16 }}>
                       <AppText color={Colors.text} style={{ marginBottom: 12 }}>
                         <AppText color={Colors.text} style={{ fontWeight: "bold" }}>{item.sender_name}</AppText> wants to connect with you.
                       </AppText>
                       <View style={{ flexDirection: "row", gap: 8 }}>
-                        <AppButton variant="solid" size="sm" style={{ flex: 1 }} onPress={() => handleRespondToRequest(item.id, true)}>Accept</AppButton>
-                        <AppButton variant="outline" size="sm" style={{ flex: 1 }} onPress={() => handleRespondToRequest(item.id, false)}>Decline</AppButton>
+                        <AppButton variant="solid" size="sm" style={{ flex: 1 }} onPress={() => handleRespondToRequest(item.request_id || item._id, true)}>Accept</AppButton>
+                        <AppButton variant="outline" size="sm" style={{ flex: 1 }} onPress={() => handleRespondToRequest(item.request_id || item._id, false)}>Decline</AppButton>
                       </View>
                     </View>
                   );
@@ -901,6 +991,7 @@ const SamVibeNav: React.FC<SamVibeNavProps> = ({ onPartnerChange }) => {
                 // It's a notification
                 const notif = item;
                 const isUnread = notif.status !== "Seen";
+                const isHidden = notif.is_hidden;
                 const borderC = isUnread ? Colors.accent : 'transparent';
                 const bgC = isUnread ? '#ffffff' : 'rgba(255,255,255,0.4)';
 
@@ -913,8 +1004,8 @@ const SamVibeNav: React.FC<SamVibeNavProps> = ({ onPartnerChange }) => {
                 
                 const renderRightActions = () => (
                   <View style={{ justifyContent: 'center', height: '100%', flex: 1, alignItems: 'flex-end', paddingRight: 24 }}>
-                    <Ionicons name={isUnread ? "checkmark-outline" : "mail-unread-outline"} size={20} color={isUnread ? '#44aa44' : Colors.accent} />
-                    <AppText color={isUnread ? '#44aa44' : Colors.accent} variant="mono" style={{ fontSize: 10, marginTop: 4, letterSpacing: 1 }}>{isUnread ? 'READ' : 'UNREAD'}</AppText>
+                    <Ionicons name={isHidden ? "eye-outline" : "eye-off-outline"} size={20} color={Colors.accent} />
+                    <AppText color={Colors.accent} variant="mono" style={{ fontSize: 10, marginTop: 4, letterSpacing: 1 }}>{isHidden ? 'UNHIDE' : 'HIDE'}</AppText>
                   </View>
                 );
 
@@ -935,22 +1026,20 @@ const SamVibeNav: React.FC<SamVibeNavProps> = ({ onPartnerChange }) => {
                          setNotifications(nList);
                       }}
                       onSwipeableRightOpen={async () => {
-                         if (isUnread) {
-                            await markNotificationSeen(notif.id);
-                            setUnreadCount(prev => Math.max(0, prev - 1));
+                         if (isHidden) {
+                            await unhideNotification(notif.id);
                             const nList = [...notifications];
                             const idx = nList.findIndex(x => x.id === notif.id);
                             if (idx > -1) {
-                               nList[idx] = { ...nList[idx], status: "Seen" };
+                               nList[idx] = { ...nList[idx], is_hidden: false };
                                setNotifications(nList);
                             }
                          } else {
-                            await markNotificationUnread(notif.id);
-                            setUnreadCount(prev => prev + 1);
+                            await hideNotification(notif.id);
                             const nList = [...notifications];
                             const idx = nList.findIndex(x => x.id === notif.id);
                             if (idx > -1) {
-                               nList[idx] = { ...nList[idx], status: "Delivered" };
+                               nList[idx] = { ...nList[idx], is_hidden: true };
                                setNotifications(nList);
                             }
                          }
@@ -998,6 +1087,37 @@ const SamVibeNav: React.FC<SamVibeNavProps> = ({ onPartnerChange }) => {
                         <AppText color={Colors.muted} style={{ fontSize: 14 }}>
                           {notif.message}
                         </AppText>
+                        
+                        {notif.metadata?.type === "vibe_check_request" && (
+                          <View style={{ flexDirection: "row", gap: 8, marginTop: 12 }}>
+                            <AppButton 
+                              variant="solid" 
+                              size="sm" 
+                              style={{ flex: 1, backgroundColor: Colors.ink }} 
+                              onPress={async () => {
+                                await handleRespondToRequest(notif.metadata.request_id, true);
+                                await handleDeleteNotification(notif.id);
+                                const nList = notifications.filter(x => x.id !== notif.id);
+                                setNotifications(nList);
+                              }}
+                            >
+                              Accept
+                            </AppButton>
+                            <AppButton 
+                              variant="outline" 
+                              size="sm" 
+                              style={{ flex: 1 }} 
+                              onPress={async () => {
+                                await handleRespondToRequest(notif.metadata.request_id, false);
+                                await handleDeleteNotification(notif.id);
+                                const nList = notifications.filter(x => x.id !== notif.id);
+                                setNotifications(nList);
+                              }}
+                            >
+                              Decline
+                            </AppButton>
+                          </View>
+                        )}
                       </Pressable>
                     </Swipeable>
                   </View>
@@ -1078,56 +1198,77 @@ const SamVibeNav: React.FC<SamVibeNavProps> = ({ onPartnerChange }) => {
             </View>
           ) : (
             connections.map((conn, i) => (
-              <Pressable
-                key={conn.user_id || i}
-                style={i === activeIdx ? styles.connectionCardActive : styles.connectionCard}
-                onPress={() => {
-                  setActiveIdx(i);
-                  setSwitchSheet(false);
-                  if (onPartnerChange && conn.user_id) {
-                    onPartnerChange(conn.user_id);
-                  }
-                }}
-                onLongPress={() => handleDeleteConnection(conn.user_id, conn.name)}
-              >
-                <View style={{ position: 'relative' }}>
-                  {conn.profile_picture ? (
-                    <Image 
-                      source={{ uri: conn.profile_picture.startsWith('http') ? conn.profile_picture : `${API_BASE}/${conn.profile_picture.replace(/\\/g, '/')}` }} 
-                      style={[styles.avatarBig, i === activeIdx ? { borderWidth: 2, borderColor: Colors.white } : {}]} 
-                    />
-                  ) : (
-                    <View style={[styles.avatarBig, i === activeIdx ? { backgroundColor: "#C44D4D" } : { backgroundColor: "#e8b4b4af" }]}>
-                      <AppText style={{ color: "#fff", fontSize: 24 }}>
-                        {conn.name?.charAt(0).toUpperCase() || "?"}
+              <View key={conn.user_id || i} style={i === activeIdx ? [styles.connectionCardActive, { flexDirection: 'column', alignItems: 'stretch', padding: 0, overflow: 'hidden' }] : [styles.connectionCard, { flexDirection: 'column', alignItems: 'stretch', padding: 0, overflow: 'hidden' }]}>
+                <Pressable
+                  style={{ flexDirection: 'row', alignItems: 'center', padding: 14 }}
+                  onPress={() => {
+                    setActiveIdx(i);
+                    setSwitchSheet(false);
+                    if (conn.user_id) {
+                      AsyncStorage.setItem('@vibe_active_partner', conn.user_id);
+                      if (onPartnerChange) {
+                        onPartnerChange(conn.user_id);
+                      }
+                    }
+                  }}
+                  onLongPress={() => handleDeleteConnection(conn.user_id, conn.name)}
+                >
+                  <View style={{ position: 'relative' }}>
+                    {conn.profile_picture ? (
+                      <Image 
+                        source={{ uri: conn.profile_picture.startsWith('http') ? conn.profile_picture : `${API_BASE}/${conn.profile_picture.replace(/\\/g, '/')}` }} 
+                        style={[styles.avatarBig, i === activeIdx ? { borderWidth: 2, borderColor: Colors.white } : {}]} 
+                      />
+                    ) : (
+                      <View style={[styles.avatarBig, i === activeIdx ? { backgroundColor: "#C44D4D" } : { backgroundColor: "#e8b4b4af" }]}>
+                        <AppText style={{ color: "#fff", fontSize: 24 }}>
+                          {conn.name?.charAt(0).toUpperCase() || "?"}
+                        </AppText>
+                      </View>
+                    )}
+                    {conn.is_online && (
+                      <View style={{ position: 'absolute', bottom: 0, right: 0, width: 14, height: 14, borderRadius: 7, backgroundColor: '#4CAF50', borderWidth: 2, borderColor: i === activeIdx ? Colors.accent : Colors.background }} />
+                    )}
+                  </View>
+                  <View style={{ flex: 1, paddingLeft: 12 }}>
+                    <AppText variant="heading" size={18} color={i === activeIdx ? Colors.white : Colors.ink}>
+                      {conn.name}
+                    </AppText>
+                    <AppText variant="mono" color={Colors.muted} style={{ fontSize: 10 }}>
+                      CONNECTED {new Date(conn.connected_at).toLocaleDateString().toUpperCase()}
+                    </AppText>
+                    {conn.pending_questions > 0 && (
+                      <AppText variant="mono" color={i === activeIdx ? Colors.white : Colors.accent} style={{ fontSize: 10, marginTop: 4 }}>
+                        • {conn.pending_questions} PENDING TODAY
+                      </AppText>
+                    )}
+                  </View>
+                  {i === activeIdx && (
+                    <View style={styles.activeTag}>
+                      <AppText variant="mono" style={{ color: "#fff", fontSize: 12 }}>
+                        ACTIVE
                       </AppText>
                     </View>
                   )}
-                  {conn.is_online && (
-                    <View style={{ position: 'absolute', bottom: 0, right: 0, width: 14, height: 14, borderRadius: 7, backgroundColor: '#4CAF50', borderWidth: 2, borderColor: i === activeIdx ? Colors.accent : Colors.background }} />
-                  )}
-                </View>
-                <View style={{ flex: 1, paddingLeft: 12 }}>
-                  <AppText variant="heading" size={18} color={i === activeIdx ? Colors.white : Colors.ink}>
-                    {conn.name}
-                  </AppText>
-                  <AppText variant="mono" color={Colors.muted} style={{ fontSize: 10 }}>
-                    CONNECTED {new Date(conn.connected_at).toLocaleDateString().toUpperCase()}
-                  </AppText>
-                  {conn.pending_questions > 0 && (
-                    <AppText variant="mono" color={i === activeIdx ? Colors.white : Colors.accent} style={{ fontSize: 10, marginTop: 4 }}>
-                      • {conn.pending_questions} PENDING TODAY
-                    </AppText>
-                  )}
-                </View>
-                {i === activeIdx && (
-                  <View style={styles.activeTag}>
-                    <AppText variant="mono" style={{ color: "#fff", fontSize: 12 }}>
-                      ACTIVE
-                    </AppText>
+                </Pressable>
+                
+                {i === activeIdx && conn.user_id && (
+                  <View style={{ flexDirection: 'row', borderTopWidth: 1, borderColor: '#333' }}>
+                    <Pressable 
+                      style={{ flex: 1, paddingVertical: 12, alignItems: 'center', borderRightWidth: 1, borderColor: '#333' }}
+                      onPress={() => setResetSheetPartnerId(conn.user_id)}
+                    >
+                      <AppText variant="mono" style={{ color: '#aaa', fontSize: 11 }}>RESET</AppText>
+                    </Pressable>
+                    <Pressable 
+                      style={{ flex: 1, paddingVertical: 12, alignItems: 'center' }}
+                      onPress={() => setBreakSheetPartnerId(conn.user_id)}
+                    >
+                      <AppText variant="mono" style={{ color: '#E57373', fontSize: 11 }}>BREAK</AppText>
+                    </Pressable>
                   </View>
                 )}
-              </Pressable>
+              </View>
             ))
           )}
 
@@ -1172,6 +1313,133 @@ const SamVibeNav: React.FC<SamVibeNavProps> = ({ onPartnerChange }) => {
           </Pressable>
         </View>
       </BottomSheet>
+
+      {/* ==================== BREAK CONNECTION SHEET ==================== */}
+      <BottomSheet
+        open={!!breakSheetPartnerId}
+        onClose={() => {
+          setBreakSheetPartnerId(null);
+          setBreakPassword("");
+        }}
+        kicker="DANGER ZONE"
+        title="Break Connection"
+      >
+        <AppText variant="serifItalic" size={14} color={Colors.muted} style={{ marginBottom: 20 }}>
+          This will permanently delete your connection and all associated data. This action cannot be undone.
+        </AppText>
+        <View style={{ marginBottom: 20 }}>
+          <AppText variant="mono" color={Colors.muted} style={{ fontSize: 11, marginBottom: 8 }}>
+            APP PASSWORD
+          </AppText>
+          <View style={{ position: 'relative' }}>
+            <TextInput
+              style={{
+                backgroundColor: '#E7DFD2',
+                color: Colors.ink,
+                fontFamily: 'Inter-Medium',
+                fontSize: 16,
+                padding: 16,
+                paddingRight: 50,
+                borderRadius: 12,
+                borderWidth: 1,
+                borderColor: Colors.rule,
+              }}
+              placeholder="Enter your password"
+              placeholderTextColor={Colors.muted}
+              secureTextEntry={!showPassword}
+              value={breakPassword}
+              onChangeText={setBreakPassword}
+              editable={!processingBreakReset}
+            />
+            <Pressable
+              onPress={() => setShowPassword(!showPassword)}
+              style={{
+                position: 'absolute',
+                right: 16,
+                top: 16,
+                bottom: 0,
+              }}
+            >
+              <Ionicons name={showPassword ? "eye-off-outline" : "eye-outline"} size={22} color={Colors.muted} />
+            </Pressable>
+          </View>
+        </View>
+        <Pressable 
+          style={{ backgroundColor: '#E57373', padding: 16, borderRadius: 12, alignItems: 'center' }}
+          onPress={handleBreakConnection}
+          disabled={processingBreakReset}
+        >
+          {processingBreakReset ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <AppText variant="heading" size={16} color="#fff">BREAK CONNECTION</AppText>
+          )}
+        </Pressable>
+      </BottomSheet>
+
+      {/* ==================== RESET CONNECTION SHEET ==================== */}
+      <BottomSheet
+        open={!!resetSheetPartnerId}
+        onClose={() => {
+          setResetSheetPartnerId(null);
+          setResetPassword("");
+        }}
+        kicker="START FRESH"
+        title="Request Reset"
+      >
+        <AppText variant="serifItalic" size={14} color={Colors.muted} style={{ marginBottom: 20 }}>
+          This will send a request to your partner to wipe all progress and return to Day 1. They must accept it.
+        </AppText>
+        <View style={{ marginBottom: 20 }}>
+          <AppText variant="mono" color={Colors.muted} style={{ fontSize: 11, marginBottom: 8 }}>
+            APP PASSWORD
+          </AppText>
+          <View style={{ position: 'relative' }}>
+            <TextInput
+              style={{
+                backgroundColor: '#E7DFD2',
+                color: Colors.ink,
+                fontFamily: 'Inter-Medium',
+                fontSize: 16,
+                padding: 16,
+                paddingRight: 50,
+                borderRadius: 12,
+                borderWidth: 1,
+                borderColor: Colors.rule,
+              }}
+              placeholder="Enter your password"
+              placeholderTextColor={Colors.muted}
+              secureTextEntry={!showPassword}
+              value={resetPassword}
+              onChangeText={setResetPassword}
+              editable={!processingBreakReset}
+            />
+            <Pressable
+              onPress={() => setShowPassword(!showPassword)}
+              style={{
+                position: 'absolute',
+                right: 16,
+                top: 16,
+                bottom: 0,
+              }}
+            >
+              <Ionicons name={showPassword ? "eye-off-outline" : "eye-outline"} size={22} color={Colors.muted} />
+            </Pressable>
+          </View>
+        </View>
+        <Pressable 
+          style={{ backgroundColor: Colors.ink, padding: 16, borderRadius: 12, alignItems: 'center' }}
+          onPress={handleRequestResetConnection}
+          disabled={processingBreakReset}
+        >
+          {processingBreakReset ? (
+            <ActivityIndicator color={Colors.bone} />
+          ) : (
+            <AppText variant="heading" size={16} color={Colors.bone}>SEND REQUEST</AppText>
+          )}
+        </Pressable>
+      </BottomSheet>
+
     </View>
   );
 };

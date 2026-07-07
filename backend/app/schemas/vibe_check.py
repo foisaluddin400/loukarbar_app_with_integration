@@ -7,11 +7,19 @@ class VibeCheckProfileCreate(BaseModel):
 
 class VibeCheckProfileUpdate(BaseModel):
     name: Optional[str] = None
+    vibe_key_enabled: Optional[bool] = None
+
+class VibeCheckPasswordRequest(BaseModel):
+    password: str
+
+class VibeCheckResetRespondRequest(BaseModel):
+    accept: bool
 
 class VibeCheckProfileResponse(BaseModel):
     user_id: str
     name: str
     vibe_key: str
+    vibe_key_enabled: bool = True
     profile_picture: Optional[str] = None
     connect: int
     active: int
@@ -40,6 +48,9 @@ class VibeCheckRequest(BaseModel):
     request_id: str
     sender_id: str
     sender_name: str
+    recipient_id: str
+    recipient_name: str
+    direction: str = "incoming"
     created_at: datetime
 
 class VibeCheckConnectRequest(BaseModel):

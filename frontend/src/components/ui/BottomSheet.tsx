@@ -6,6 +6,7 @@ import {
   StyleSheet,
   Dimensions,
   Platform,
+  KeyboardAvoidingView
 } from "react-native";
 import { GestureHandlerRootView, ScrollView } from "react-native-gesture-handler";
 import Animated, {
@@ -72,7 +73,10 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
       statusBarTranslucent
     >
       <GestureHandlerRootView style={{ flex: 1 }}>
-        <View style={styles.overlay}>
+        <KeyboardAvoidingView 
+          behavior={Platform.OS === "ios" ? "padding" : "padding"}
+          style={styles.overlay}
+        >
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
 
         <Animated.View
@@ -136,7 +140,7 @@ export const BottomSheet: React.FC<BottomSheetProps> = ({
             </ScrollView>
           )}
         </Animated.View>
-      </View>
+        </KeyboardAvoidingView>
       </GestureHandlerRootView>
     </Modal>
   );

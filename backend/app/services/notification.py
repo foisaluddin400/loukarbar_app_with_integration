@@ -46,15 +46,59 @@ class NotificationService:
         }
         await ws_manager.broadcast_to_user(payload.recipient_id, ws_payload)
         
+        # Send OneSignal Push Notification
+        import asyncio
+        asyncio.create_task(self._send_onesignal_push(payload.recipient_id, new_doc.get("title", ""), new_doc.get("message", "")))
+        
         return await self._map_notification(new_doc, payload.timezone)
 
-    async def get_my_notifications(self, user_id: str, page: int = 1, size: int = 20, user_timezone: str = "UTC") -> Tuple[List[Dict[str, Any]], int, int]:
+    async def _send_onesignal_push(self, user_id: str, title: str, message: str) -> None:
+        if not settings.ONESIGNAL_APP_ID or not settings.ONESIGNAL_REST_API_KEY:
+            return
+            
+        import httpx
+        url = "https://onesignal.com/api/v1/notifications"
+        headers = {
+            "Authorization": f"Basic {settings.ONESIGNAL_REST_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "app_id": settings.ONESIGNAL_APP_ID,
+            "include_aliases": {"external_id": [user_id]},
+            "target_channel": "push",
+            "headings": {"en": title},
+            "contents": {"en": message},
+        }
+        
+        try:
+            async with httpx.AsyncClient() as client:
+                res = await client.post(url, json=payload, headers=headers, timeout=5.0)
+                if res.status_code >= 400:
+                    print(f"OneSignal Error: {res.text}")
+        except Exception as e:
+            print(f"Failed to send OneSignal push: {str(e)}")
+
+    async def get_my_notifications(self, user_id: str, page: int = 1, size: int = 20, user_timezone: str = "UTC", types: Optional[List[str]] = None, is_hidden: Optional[bool] = None) -> Tuple[List[Dict[str, Any]], int, int]:
         query = {"recipient_id": user_id}
+        if types:
+            query["type"] = {"$in": types}
+        if is_hidden is not None:
+            query["is_hidden"] = is_hidden
+        else:
+            # By default, treat missing is_hidden as false or missing, unless explicitly querying for hidden
+            # Actually if not specified, it's safer to just let it return anything (or we can enforce unhidden only if we want, but returning all is fine if they don't ask).
+            pass
         
         # Auto-mark delivered if scheduled time has passed
         now = datetime.now(timezone.utc)
+        
+        # Update delivered status only for the filtered types (if any)
+        delivered_query = {"recipient_id": user_id, "status": NotificationStatus.SCHEDULED, "scheduled_for": {"$lte": now}}
+        if types:
+            delivered_query["type"] = {"$in": types}
+            
         await self.notifications_collection.update_many(
-            {"recipient_id": user_id, "status": NotificationStatus.SCHEDULED, "scheduled_for": {"$lte": now}},
+            delivered_query,
             {"$set": {"status": NotificationStatus.DELIVERED, "delivered_at": now}}
         )
 
@@ -62,7 +106,13 @@ class NotificationService:
         cursor = self.notifications_collection.find(query).sort("scheduled_for", -1).skip(skip).limit(size)
         docs = await cursor.to_list(length=None)
         total = await self.notifications_collection.count_documents(query)
-        unread_count = await self.notifications_collection.count_documents({"recipient_id": user_id, "status": {"$ne": NotificationStatus.SEEN}})
+        
+        unread_query = {"recipient_id": user_id, "status": {"$ne": NotificationStatus.SEEN}}
+        if types:
+            unread_query["type"] = {"$in": types}
+        if is_hidden is not None:
+            unread_query["is_hidden"] = is_hidden
+        unread_count = await self.notifications_collection.count_documents(unread_query)
 
         return [await self._map_notification(d, user_timezone) for d in docs], total, unread_count
 

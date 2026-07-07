@@ -5,9 +5,16 @@ export const logPresence = async (data) => {
   return response.data;
 };
 
-export const getMyNotifications = async (page = 1, size = 20) => {
+export const getMyNotifications = async (page = 1, size = 20, types = null, isHidden = null) => {
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const response = await api.get(`/notifications/?page=${page}&size=${size}&timezone=${encodeURIComponent(tz)}`);
+  let url = `/notifications/?page=${page}&size=${size}&timezone=${encodeURIComponent(tz)}`;
+  if (types && types.length > 0) {
+    url += `&types=${encodeURIComponent(types.join(','))}`;
+  }
+  if (isHidden !== null) {
+    url += `&is_hidden=${isHidden}`;
+  }
+  const response = await api.get(url);
   return response.data;
 };
 

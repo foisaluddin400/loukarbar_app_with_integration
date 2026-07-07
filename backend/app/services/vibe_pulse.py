@@ -52,8 +52,8 @@ class VibePulseService:
         await ws_manager.broadcast_to_user(user_id, ws_event)
         await ws_manager.broadcast_to_user(payload.partner_id, ws_event)
 
-        # --- Notification: public red flags alert the partner ---
-        if payload.type == FlagType.PUBLIC and payload.category == FlagCategory.RED:
+        # --- Notification: public flags alert the partner ---
+        if payload.type == FlagType.PUBLIC:
             from app.services.notification import notification_service
             from app.schemas.notification import NotificationCreate, NotificationType
 
@@ -61,11 +61,23 @@ class VibePulseService:
             user = await self.db["users"].find_one({"_id": ObjectId(user_id)})
             sender_name = user.get("name", "Your partner") if user else "Your partner"
 
+            title_map = {
+                FlagCategory.RED: "🚩 Red Flag Raised",
+                FlagCategory.YELLOW: "⚠️ Yellow Flag Raised",
+                FlagCategory.GREEN: "💚 Green Flag Raised",
+            }
+            
+            type_map = {
+                FlagCategory.RED: NotificationType.RED_FLAG,
+                FlagCategory.YELLOW: NotificationType.YELLOW_FLAG,
+                FlagCategory.GREEN: NotificationType.GREEN_FLAG,
+            }
+
             notif = NotificationCreate(
                 recipient_id=payload.partner_id,
-                title="🚩 Red Flag Raised",
-                message=f"{sender_name} raised a public red flag: \"{payload.text}\"",
-                type=NotificationType.RED_FLAG,
+                title=title_map.get(payload.category, "Flag Raised"),
+                message=f"{sender_name} raised a public {payload.category.value} flag: \"{payload.text}\"",
+                type=type_map.get(payload.category, NotificationType.SYSTEM),
                 timezone=payload.timezone,
             )
             await notification_service.schedule_notification(user_id, notif)
