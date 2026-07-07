@@ -8,13 +8,18 @@ import RootNavigator from './src/navigation/RootNavigator';
 import { Colors } from './src/constants/colors';
 import { CustomAlert } from './src/components/ui/CustomAlert';
 
-import { OneSignal } from 'react-native-onesignal';
+import { Platform } from 'react-native';
 
 // OneSignal Initialization
 const ONE_SIGNAL_APP_ID = process.env.EXPO_PUBLIC_ONESIGNAL_APP_ID;
-if (ONE_SIGNAL_APP_ID) {
-  OneSignal.initialize(ONE_SIGNAL_APP_ID);
-  OneSignal.Notifications.requestPermission(true);
+if (ONE_SIGNAL_APP_ID && Platform.OS !== 'web') {
+  try {
+    const { OneSignal } = require('react-native-onesignal');
+    OneSignal.initialize(ONE_SIGNAL_APP_ID);
+    OneSignal.Notifications.requestPermission(true);
+  } catch (e) {
+    console.log("OneSignal initialization skipped:", e);
+  }
 }
 
 export default function App() {

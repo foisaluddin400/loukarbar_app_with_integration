@@ -33,9 +33,9 @@ const Login = () => {
       await AsyncStorage.setItem('refresh_token', data.refresh_token);
 
       try {
-        const { getMe } = require('../../services/authApi');
+        const { getMe } = require('../services/authApi');
         const user = await getMe();
-        if (user && user.id) {
+        if (user && user.id && Platform.OS !== 'web') {
           const { OneSignal } = require('react-native-onesignal');
           OneSignal.login(user.id);
         }
