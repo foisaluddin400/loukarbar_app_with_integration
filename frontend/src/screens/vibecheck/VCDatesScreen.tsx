@@ -204,9 +204,9 @@ export const VCDatesScreen: React.FC = () => {
   }, [fetchData]);
 
   const handlePartnerChange = (newPartnerId: string) => {
+    setPartnerId(newPartnerId);
     const p = activePartners.find((ap) => ap.user_id === newPartnerId);
     if (p) {
-      setPartnerId(newPartnerId);
       setPartnerName(p.name);
     }
   };
