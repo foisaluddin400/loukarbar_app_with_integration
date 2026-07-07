@@ -976,6 +976,21 @@ const SamVibeNav: React.FC<SamVibeNavProps> = ({ onPartnerChange }) => {
                       </View>
                     );
                   }
+                  const isOutgoing = item.sender_id === profile?.user_id;
+                  
+                  if (isOutgoing) {
+                    return (
+                      <View style={{ backgroundColor: '#fff', padding: 16, borderRadius: 12, borderWidth: 1, borderColor: Colors.rule, marginBottom: 16 }}>
+                        <AppText color={Colors.text} style={{ marginBottom: 12 }}>
+                          You sent a connection request to <AppText color={Colors.text} style={{ fontWeight: "bold" }}>{item.recipient_name}</AppText>.
+                        </AppText>
+                        <View style={{ flexDirection: "row", gap: 8 }}>
+                          <AppButton variant="outline" size="sm" style={{ flex: 1 }} disabled>Pending...</AppButton>
+                        </View>
+                      </View>
+                    );
+                  }
+
                   return (
                     <View style={{ backgroundColor: '#fff', padding: 16, borderRadius: 12, borderWidth: 1, borderColor: Colors.rule, marginBottom: 16 }}>
                       <AppText color={Colors.text} style={{ marginBottom: 12 }}>

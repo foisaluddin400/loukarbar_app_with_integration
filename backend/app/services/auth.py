@@ -58,29 +58,44 @@ def decode_token(token: str, secret: Optional[str] = None) -> Optional[dict]:
     except jwt.PyJWTError:
         return None
 
-def send_otp_email(to_email: str, otp: str, subject: str = "Verify your email - Loukarver") -> bool:
+def send_otp_email(to_email: str, otp: str, subject: str = "Verify your email - Aligned") -> bool:
     if not settings.SMTP_HOST or not settings.SMTP_USER or not settings.SMTP_PASSWORD:
         print(f"[SMTP Warning] Credentials missing in .env, skipping email to {to_email}. OTP is {otp}")
         return False
         
     try:
         msg = MIMEMultipart()
-        msg['From'] = f"Loukarver <{settings.FROM_EMAIL or settings.SMTP_USER}>"
+        msg['From'] = f"Aligned <{settings.FROM_EMAIL or settings.SMTP_USER}>"
         msg['To'] = to_email
         msg['Subject'] = subject
         
+        plain_body = f"""Welcome to Aligned. Here is your key to get in.
+        
+Your One-Time Password (OTP) is: {otp}
+
+This code unlocks your account for the next 15 minutes.
+If you didn't request this, you can safely ignore this email.
+"""
+        msg.attach(MIMEText(plain_body, 'plain'))
+        
         html_body = f"""
         <html>
-        <body style="font-family: Arial, sans-serif; background-color: #f9f9f9; padding: 20px; color: #333;">
-            <div style="max-width: 600px; margin: 0 auto; background: #fff; border-radius: 8px; padding: 30px; box-shadow: 0 4px 10px rgba(0,0,0,0.05);">
-                <h2 style="color: #6c5ce7; text-align: center; margin-bottom: 24px;">Loukarver</h2>
-                <p>Hello,</p>
-                <p>Please use the following One-Time Password (OTP) to complete your verification or request:</p>
-                <div style="font-size: 32px; font-weight: bold; text-align: center; margin: 30px 0; letter-spacing: 4px; color: #2d3436; background: #f1f2f6; padding: 15px; border-radius: 6px;">
+        <head>
+            <style>
+                @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;1,400&family=Inter:wght@400;500&display=swap');
+            </style>
+        </head>
+        <body style="font-family: 'Inter', Arial, sans-serif; background-color: #EFE7DD; padding: 40px 20px; color: #1A1614; margin: 0;">
+            <div style="max-width: 500px; margin: 0 auto; background: #FFFFFF; border-radius: 16px; padding: 40px; box-shadow: 0 10px 25px rgba(26, 22, 20, 0.05); border: 1px solid #C9BDA5;">
+                <h1 style="font-family: 'Playfair Display', serif; color: #B8553E; text-align: center; margin-bottom: 8px; font-size: 32px; font-weight: 600; letter-spacing: -0.5px;">Aligned.</h1>
+                <p style="font-family: 'Playfair Display', serif; font-style: italic; text-align: center; color: #8A7E6C; margin-top: 0; margin-bottom: 32px; font-size: 16px;">Welcome to Aligned. Here is your key to get in.</p>
+                
+                <div style="font-size: 36px; font-family: 'Inter', sans-serif; font-weight: 500; text-align: center; margin: 40px 0; letter-spacing: 8px; color: #1A1614; background: #EFE7DD; padding: 24px; border-radius: 12px; border: 1px dashed #B8553E;">
                     {otp}
                 </div>
-                <p style="font-size: 13px; color: #7f8c8d; text-align: center; margin-top: 30px;">
-                    This code is valid for 15 minutes. If you did not request this code, please ignore this email.
+                
+                <p style="font-size: 13px; color: #8A7E6C; text-align: center; margin-top: 40px; line-height: 1.6;">
+                    This code unlocks your account for the next 15 minutes.<br>If you didn't request this, you can safely ignore this email.
                 </p>
             </div>
         </body>
