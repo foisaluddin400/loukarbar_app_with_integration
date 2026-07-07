@@ -9,10 +9,13 @@ import { Colors } from './src/constants/colors';
 import { CustomAlert } from './src/components/ui/CustomAlert';
 
 import { Platform } from 'react-native';
+import Constants, { ExecutionEnvironment } from 'expo-constants';
 
 // OneSignal Initialization
 const ONE_SIGNAL_APP_ID = process.env.EXPO_PUBLIC_ONESIGNAL_APP_ID;
-if (ONE_SIGNAL_APP_ID && Platform.OS !== 'web') {
+const isExpoGo = Constants.executionEnvironment === ExecutionEnvironment.StoreClient || Constants.appOwnership === 'expo';
+
+if (ONE_SIGNAL_APP_ID && Platform.OS !== 'web' && !isExpoGo) {
   try {
     const { OneSignal } = require('react-native-onesignal');
     OneSignal.initialize(ONE_SIGNAL_APP_ID);

@@ -16,13 +16,15 @@ const VerifyEmail = () => {
   const [otp, setOtp] = useState('');
   const [loading, setLoading] = useState(false);
   const [resending, setResending] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
   const route = useRoute<VerifyEmailRouteProp>();
   const email = route.params.email;
 
   const handleVerify = async () => {
+    setErrorMsg('');
     if (!otp) {
-      Alert.alert('Missing Field', 'Please enter the verification code.');
+      setErrorMsg('Please enter the verification code.');
       return;
     }
     try {
@@ -33,20 +35,21 @@ const VerifyEmail = () => {
       navigation.navigate('ModeSelector');
     } catch (error: any) {
       const errorMessage = error.response?.data?.detail || error.message || 'Verification failed.';
-      Alert.alert('Verification Failed', errorMessage);
+      setErrorMsg(errorMessage);
     } finally {
       setLoading(false);
     }
   };
 
   const handleResend = async () => {
+    setErrorMsg('');
     try {
       setResending(true);
       await resendOtp(email);
       Alert.alert('Code Sent', 'A new verification code has been sent to your email.');
     } catch (error: any) {
       const errorMessage = error.response?.data?.detail || error.message || 'Failed to resend code.';
-      Alert.alert('Error', errorMessage);
+      setErrorMsg(errorMessage);
     } finally {
       setResending(false);
     }
@@ -66,15 +69,22 @@ const VerifyEmail = () => {
             We sent a 6-digit code to {email}.
           </AppText>
 
-          <AppTextInput
-            label="Verification code"
-            n="01"
-            value={otp}
-            onChangeText={setOtp}
-            placeholder="000000"
-            keyboardType="number-pad"
-            maxLength={6}
-          />
+          <View style={styles.inputGroup}>
+            <TextInput
+              style={styles.input}
+              placeholder="000000"
+              placeholderTextColor={Colors.muted}
+              value={otp}
+              onChangeText={setOtp}
+              keyboardType="number-pad"
+              maxLength={6}
+            />
+            {errorMsg ? (
+              <AppText color="red" style={{ marginTop: 8, fontSize: 13 }}>
+                {errorMsg}
+              </AppText>
+            ) : null}
+          </View>
         </View>
 
         <View style={styles.actions}>

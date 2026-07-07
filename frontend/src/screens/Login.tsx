@@ -35,7 +35,12 @@ const Login = () => {
       try {
         const { getMe } = require('../services/authApi');
         const user = await getMe();
-        if (user && user.id && Platform.OS !== 'web') {
+        
+        const Constants = require('expo-constants').default;
+        const ExecutionEnvironment = require('expo-constants').ExecutionEnvironment;
+        const isExpoGo = Constants.executionEnvironment === ExecutionEnvironment?.StoreClient || Constants.appOwnership === 'expo';
+        
+        if (user && user.id && Platform.OS !== 'web' && !isExpoGo) {
           const { OneSignal } = require('react-native-onesignal');
           OneSignal.login(user.id);
         }
