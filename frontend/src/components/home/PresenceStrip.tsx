@@ -50,7 +50,7 @@ export const PresenceStrip: React.FC<PresenceStripProps> = ({ onRedirect, refres
         }
 
         if (notificationsRes.success && notificationsRes.data) {
-          const presenceOnly = notificationsRes.data.filter((n: any) => n.type === 'Presence' || n.type === 'Partner Check-in' || n.type === 'Ritual Completed' || n.type === 'Proposal' || n.type === 'Reunion');
+          const presenceOnly = notificationsRes.data.filter((n: any) => n.type === 'Presence' || n.type === 'Partner Check-in' || n.type === 'Ritual Completed' || n.type === 'Proposal' || n.type === 'Reunion' || n.type === 'Mood Change');
           setPresenceNotifications(presenceOnly);
         }
       } catch (e) {
