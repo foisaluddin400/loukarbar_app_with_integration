@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 
 from app.core.config import settings
 from app.schemas.mood import MoodListCreate, MoodListUpdate, MoodLogCreate, MoodLogUpdate
+from app.services.notification import notification_service
+from app.schemas.notification import NotificationCreate, NotificationType
 
 class MoodService:
     def __init__(self) -> None:
@@ -178,6 +180,29 @@ class MoodService:
         }
         result = await self.mood_history.insert_one(new_doc)
         new_doc["id"] = str(result.inserted_id)
+        
+        # Notify partner about mood change
+        try:
+            user = await self.users.find_one({"_id": ObjectId(user_id)})
+            if user and user.get("is_aligned") and user.get("partner"):
+                partner_id = user["partner"].get("user_id")
+                user_name = user.get("name", "Your partner")
+                mood_name = mood_option["name"]
+                if partner_id:
+                    await notification_service.schedule_notification(
+                        sender_id=user_id,
+                        payload=NotificationCreate(
+                            recipient_id=partner_id,
+                            title="Mood Update",
+                            message=f"{user_name} is feeling {mood_name}.",
+                            type=NotificationType.MOOD_CHANGE,
+                            scheduled_for=datetime.now(timezone.utc),
+                            timezone="UTC"
+                        )
+                    )
+        except Exception as e:
+            print(f"Failed to send mood change notification: {e}")
+        
         return new_doc
 
     async def get_mood_history(self, user_id: str) -> List[Dict[str, Any]]:
@@ -226,7 +251,12 @@ class MoodService:
         
         if user and user.get("partner"):
             partner_id = user["partner"]["user_id"]
-            partner_name = user["partner"].get("name", "Partner")
+            # Fetch partner's CURRENT name from the users collection (not the cached embedded doc)
+            partner_doc = await self.users.find_one({"_id": ObjectId(partner_id)})
+            if partner_doc:
+                partner_name = partner_doc.get("name", "Partner")
+            else:
+                partner_name = user["partner"].get("name", "Partner")
             
         states = []
         
