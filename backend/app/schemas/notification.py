@@ -15,6 +15,7 @@ class NotificationType(str, Enum):
     RITUAL_COMPLETED = "Ritual Completed"
     PROPOSAL = "Proposal"
     REUNION = "Reunion"
+    MOOD_CHANGE = "Mood Change"
     RED_FLAG = "Red Flag"
     GREEN_FLAG = "Green Flag"
     YELLOW_FLAG = "Yellow Flag"
