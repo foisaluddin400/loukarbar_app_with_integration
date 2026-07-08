@@ -58,7 +58,7 @@ const AlignedNav: React.FC = () => {
         setEditName(data.name);
       }
       
-      const notifsData = await getMyNotifications(1, 20, ["Presence", "Partner Check-in", "Ritual Completed", "Proposal", "Reunion"], false);
+      const notifsData = await getMyNotifications(1, 20, null, false);
       if (notifsData && notifsData.data) {
           setUnreadCount(notifsData.unread_count || 0);
       }

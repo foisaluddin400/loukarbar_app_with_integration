@@ -14,6 +14,7 @@ export const getMyNotifications = async (page = 1, size = 20, types = null, isHi
   if (isHidden !== null) {
     url += `&is_hidden=${isHidden}`;
   }
+  url += `&_t=${Date.now()}`;
   const response = await api.get(url);
   return response.data;
 };
