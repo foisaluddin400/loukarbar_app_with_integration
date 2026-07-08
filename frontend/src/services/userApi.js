@@ -43,6 +43,9 @@ export const getPartnerProfile = async () => {
 };
 
 export const uploadProfilePhoto = async (imageUri) => {
+  const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
+  const token = await AsyncStorage.getItem('access_token');
+
   const formData = new FormData();
   if (imageUri.startsWith('blob:') || imageUri.startsWith('data:')) {
     const res = await fetch(imageUri);
@@ -57,12 +60,21 @@ export const uploadProfilePhoto = async (imageUri) => {
     });
   }
 
-  const response = await api.post('/users/photo', formData, {
+  const response = await fetch(`${api.defaults.baseURL}/users/photo`, {
+    method: 'POST',
     headers: {
-      'Content-Type': 'multipart/form-data',
+      Authorization: `Bearer ${token}`,
+      'ngrok-skip-browser-warning': 'true',
     },
+    body: formData,
   });
-  return response.data;
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.detail || `Upload failed with status ${response.status}`);
+  }
+
+  return await response.json();
 };
 
 export const breakAlignment = async () => {

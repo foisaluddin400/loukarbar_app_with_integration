@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import os
 from app.routers import (
     relationships, auth, checkin, rituals, streak, us, 
-    music, mood, lifecycle, energy, ideas, interactions, watch, secret, dates, thread, milestone, map, notification, vibe_check, vibe_card, play, vibe_dates, vibe_pulse
+    music, mood, lifecycle, energy, ideas, interactions, watch, secret, dates, thread, milestone, map, notification, vibe_check, vibe_card, play, vibe_dates, vibe_pulse, proposals
 )
 from app.services.streak import streak_system
 from app.services.mood import mood_service
@@ -94,6 +94,7 @@ app.include_router(vibe_card.router)
 app.include_router(play.router)
 app.include_router(vibe_dates.router)
 app.include_router(vibe_pulse.router)
+app.include_router(proposals.router)
 
 # Mount StaticFiles for uploaded files
 os.makedirs("uploads", exist_ok=True)

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, Pressable, Image, Alert, PanResponder } from 'react-native';
+import { View, StyleSheet, Pressable, Image, Alert, PanResponder, DeviceEventEmitter, ScrollView } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors } from '../../constants/colors';
 import { AppText } from '../../components/ui/AppText';
@@ -12,6 +12,8 @@ import { updateUserName, uploadProfilePhoto, breakAlignment, deleteAccount } fro
 import * as ImagePicker from 'expo-image-picker';
 import { useNavigation } from '@react-navigation/native';
 import { useModeSwitcher } from '../../hooks/useModeSwitcher';
+import { Ionicons } from '@expo/vector-icons';
+import { getMyNotifications } from '../../services/notificationApi';
 
 const AlignedNav: React.FC = () => {
   const [user, setUser] = useState<any>(null);
@@ -19,7 +21,7 @@ const AlignedNav: React.FC = () => {
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [editName, setEditName] = useState("");
   const [isSaving, setIsSaving] = useState(false);
-  const [photoBlobUrl, setPhotoBlobUrl] = useState<string | null>(null);
+  const [photoKey, setPhotoKey] = useState(Date.now());
 
   const [isBreakAlignmentOpen, setIsBreakAlignmentOpen] = useState(false);
   const [isDeleteAccountOpen, setIsDeleteAccountOpen] = useState(false);
@@ -44,21 +46,9 @@ const AlignedNav: React.FC = () => {
     })
   ).current;
 
-  const fetchPhotoBlob = async (userId: string, currentToken: string) => {
-    try {
-      const res = await fetch(`${api.defaults.baseURL}/users/photo/${userId}?t=${new Date().getTime()}`, {
-        headers: { Authorization: `Bearer ${currentToken}` }
-      });
-      if (res.ok) {
-        const blob = await res.blob();
-        setPhotoBlobUrl(URL.createObjectURL(blob));
-      }
-    } catch (e) {
-      console.log("Error fetching photo blob:", e);
-    }
-  };
+  const [unreadCount, setUnreadCount] = useState<number>(0);
 
-  const fetchUser = async () => {
+  const fetchUserAndNotifications = async () => {
     try {
       const t = await AsyncStorage.getItem('access_token');
       setToken(t);
@@ -67,16 +57,20 @@ const AlignedNav: React.FC = () => {
       if (data && data.name) {
         setEditName(data.name);
       }
-      if (data && data.profile_photo_url && t) {
-        await fetchPhotoBlob(data.id, t);
+      
+      const notifsData = await getMyNotifications(1, 20, ["Presence", "Partner Check-in", "Ritual Completed", "Proposal", "Reunion"], false);
+      if (notifsData && notifsData.data) {
+          setUnreadCount(notifsData.unread_count || 0);
       }
     } catch (err) {
-      console.log("Error fetching user for nav:", err);
+      console.log("Error fetching user or notifs for nav:", err);
     }
   };
 
   useEffect(() => {
-    fetchUser();
+    fetchUserAndNotifications();
+    const sub = DeviceEventEmitter.addListener('REFRESH_ALIGNED_DATA', fetchUserAndNotifications);
+    return () => sub.remove();
   }, []);
 
   const handlePickImage = async () => {
@@ -97,6 +91,7 @@ const AlignedNav: React.FC = () => {
       setIsSaving(true);
       try {
         await uploadProfilePhoto(result.assets[0].uri);
+        setPhotoKey(Date.now()); // bust image cache
         await fetchUser(); // reload user data to get new photo
       } catch (e) {
         console.error("Photo upload failed", e);
@@ -167,15 +162,41 @@ const AlignedNav: React.FC = () => {
         aligned.
       </AppText>
 
-      <View {...panResponder.panHandlers}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }} {...panResponder.panHandlers}>
+        <Pressable onPress={() => DeviceEventEmitter.emit('OPEN_PRESENCE_HISTORY')} style={{ position: 'relative', marginTop: 4 }}>
+          <Ionicons name="notifications-outline" size={24} color={Colors.ink} />
+          {unreadCount > 0 && (
+            <View style={{
+              position: 'absolute',
+              top: -2,
+              right: -2,
+              backgroundColor: Colors.accent,
+              minWidth: 14,
+              height: 14,
+              borderRadius: 7,
+              justifyContent: 'center',
+              alignItems: 'center',
+              borderWidth: 1.5,
+              borderColor: Colors.bone,
+              paddingHorizontal: 2
+            }}>
+              <AppText style={{ color: Colors.white, fontSize: 8, fontWeight: 'bold', lineHeight: 10 }}>
+                {unreadCount}
+              </AppText>
+            </View>
+          )}
+        </Pressable>
+
         <Pressable style={styles.partnerContainer} onPress={() => setIsProfileOpen(true)}>
           <AppText variant="smallCaps" style={styles.partnerName}>
             {user && user.name ? user.name.toUpperCase() : 'USER'}
           </AppText>
           <View style={styles.avatar}>
-            {user && user.profile_photo_url && photoBlobUrl ? (
+            {user && user.profile_photo_url ? (
               <Image 
-                source={{ uri: photoBlobUrl }} 
+                source={{ 
+                  uri: `${api.defaults.baseURL}/${user.profile_photo_url.replace(/\\/g, '/')}?t=${photoKey}`
+                }} 
                 style={{ width: 32, height: 32, borderRadius: 16 }}
               />
             ) : (
@@ -197,9 +218,11 @@ const AlignedNav: React.FC = () => {
           <View style={styles.sheetAvatarContainer}>
             <Pressable onPress={handlePickImage} disabled={isSaving}>
               <View style={[styles.avatar, { width: 80, height: 80, borderRadius: 40 }]}>
-                {user && user.profile_photo_url && photoBlobUrl ? (
+                {user && user.profile_photo_url ? (
                   <Image 
-                    source={{ uri: photoBlobUrl }} 
+                    source={{ 
+                      uri: `${api.defaults.baseURL}/${user.profile_photo_url.replace(/\\/g, '/')}?t=${photoKey}`
+                    }} 
                     style={{ width: 80, height: 80, borderRadius: 40 }}
                   />
                 ) : (

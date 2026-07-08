@@ -19,6 +19,13 @@ import {
   updateNextMeet,
   getNextMeetCountdown,
 } from "../../services/usApi";
+import {
+  createProposal,
+  getPendingProposals,
+  approveProposal,
+  rejectProposal,
+} from "../../services/proposalApi";
+import { getMe } from "../../services/authApi";
 
 type UsTab = "TIME" | "DATES" | "REUNION";
 type ActiveSheet = "startDate" | "addMarkedDay" | "reunionEdit" | null;
@@ -61,7 +68,11 @@ const toCalendarDate = (dateString: string): string => {
   return dateString;
 };
 
-const UsSection: React.FC = () => {
+interface UsSectionProps {
+  refreshTrigger?: number;
+}
+
+const UsSection: React.FC<UsSectionProps> = ({ refreshTrigger = 0 }) => {
   const [activeUsTab, setActiveUsTab] = useState<UsTab>("TIME");
   const [activeSheet, setActiveSheet] = useState<ActiveSheet>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -74,6 +85,8 @@ const UsSection: React.FC = () => {
   const [daysUntilAnniversary, setDaysUntilAnniversary] = useState(0);
   const [nextMilestone, setNextMilestone] = useState<any>(null);
   const [userMilestones, setUserMilestones] = useState<any[]>([]);
+  const [pendingProposals, setPendingProposals] = useState<any[]>([]);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   // Reunion live data
   const [reunionData, setReunionData] = useState<any>(null);
@@ -145,12 +158,24 @@ const UsSection: React.FC = () => {
       console.log("Error loading countdown:", e);
     }
 
+    try {
+      const meData = await getMe();
+      if (meData) setCurrentUserId(meData.id);
+      
+      const propsRes = await getPendingProposals();
+      if (propsRes.success && propsRes.data) {
+        setPendingProposals(propsRes.data);
+      }
+    } catch (e) {
+      console.log("Error loading proposals:", e);
+    }
+
     setIsLoading(false);
   }, []);
 
   useEffect(() => {
     loadData();
-  }, [loadData]);
+  }, [loadData, refreshTrigger]);
 
   const handleMarkedDayPress = (day: DateData) => {
     setMarkedDayDate(day.dateString);
@@ -179,7 +204,12 @@ const UsSection: React.FC = () => {
     setIsSubmitting(true);
     try {
       const apiDate = toApiDate(startDateEdit);
-      await updateStartDate(apiDate);
+      const res = await createProposal("start_date", { date: apiDate });
+      if (res.success) {
+        Alert.alert("Proposal Sent", "Your partner needs to approve this change.");
+      } else {
+        Alert.alert("Error", res.message);
+      }
       handleCloseSheet();
       await loadData(); // refresh
     } catch (e) {
@@ -229,23 +259,20 @@ const UsSection: React.FC = () => {
       const apiDate = toApiDate(reunionDateEdit);
       const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-      if (reunionData) {
-        // Update existing
-        await updateNextMeet({
-          date: apiDate,
-          time: reunionTimeEdit || "12:00 PM",
-          timezone: tz,
-          city_name: reunionCityEdit || "TBD",
-        });
+      const payload = {
+        date: apiDate,
+        time: reunionTimeEdit || "12:00 PM",
+        timezone: tz,
+        city_name: reunionCityEdit || "TBD",
+      };
+      
+      const res = await createProposal("reunion_date", payload);
+      if (res.success) {
+        Alert.alert("Proposal Sent", "Your partner needs to approve this change.");
       } else {
-        // Create new
-        await setNextMeet({
-          date: apiDate,
-          time: reunionTimeEdit || "12:00 PM",
-          timezone: tz,
-          city_name: reunionCityEdit || "TBD",
-        });
+        Alert.alert("Error", res.message);
       }
+
       handleCloseSheet();
       await loadData();
     } catch (e) {
@@ -256,6 +283,39 @@ const UsSection: React.FC = () => {
   };
 
   const MARKS = ["◆", "○", "◉", "◇", "□", "🜂", "✦", "·"];
+
+  // Proposal helpers
+  const pendingStartDateProposal = pendingProposals.find((p: any) => p.type === "start_date");
+  const pendingReunionProposal = pendingProposals.find((p: any) => p.type === "reunion_date");
+  const isPartnerProposal = (proposal: any) => proposal?.partner_id === currentUserId;
+
+  const handleApproveProposal = async (proposalId: string) => {
+    try {
+      const res = await approveProposal(proposalId);
+      if (res.success) {
+        Alert.alert("Approved", "The change has been applied.");
+        await loadData();
+      } else {
+        Alert.alert("Error", res.message);
+      }
+    } catch (e) {
+      console.log("Error approving proposal:", e);
+    }
+  };
+
+  const handleRejectProposal = async (proposalId: string) => {
+    try {
+      const res = await rejectProposal(proposalId);
+      if (res.success) {
+        Alert.alert("Rejected", "The proposed change was rejected.");
+        await loadData();
+      } else {
+        Alert.alert("Error", res.message);
+      }
+    } catch (e) {
+      console.log("Error rejecting proposal:", e);
+    }
+  };
 
   return (
     <View>
@@ -333,7 +393,7 @@ const UsSection: React.FC = () => {
 
             <View style={styles.milestoneRow}>
               {[
-                { value: nextMilestone ? `${nextMilestone.days_left}` : "—", label: "MILESTONE" },
+                { value: nextMilestone ? `${nextMilestone.days_left}` : "—", label: nextMilestone ? `DAYS TO\n${nextMilestone.title.toUpperCase()}` : "MILESTONE" },
                 { value: `${daysUntilAnniversary}d`, label: "NEXT ANNIVERSARY" },
                 { value: `${monthsPassed}`, label: "MONTHS" },
               ].map(({ value, label }, index, array) => (
@@ -350,13 +410,47 @@ const UsSection: React.FC = () => {
                   <AppText
                     variant="mono"
                     color={Colors.muted}
-                    style={{ fontSize: 12, marginTop: 4 }}
+                    style={{ fontSize: 10, marginTop: 4, textAlign: 'center', lineHeight: 14 }}
                   >
                     {label}
                   </AppText>
                 </View>
               ))}
             </View>
+
+            {/* Pending Start Date Proposal Banner */}
+            {pendingStartDateProposal && (
+              <View style={{ backgroundColor: '#FFF3E0', borderRadius: 8, padding: 12, marginTop: 12, borderWidth: 1, borderColor: '#FFE0B2' }}>
+                <AppText variant="mono" color={Colors.ink2} style={{ fontSize: 10, marginBottom: 6 }}>
+                  {isPartnerProposal(pendingStartDateProposal)
+                    ? "YOUR PARTNER PROPOSED A NEW START DATE"
+                    : "AWAITING PARTNER APPROVAL"}
+                </AppText>
+                <AppText variant="serifItalic" size={15} color={Colors.ink}>
+                  Proposed: {formatReadableDate(pendingStartDateProposal.payload?.date || "")}
+                </AppText>
+                {isPartnerProposal(pendingStartDateProposal) ? (
+                  <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
+                    <Pressable
+                      style={{ flex: 1, backgroundColor: Colors.ink, borderRadius: 6, paddingVertical: 10, alignItems: 'center' }}
+                      onPress={() => handleApproveProposal(pendingStartDateProposal.id)}
+                    >
+                      <AppText variant="mono" color={Colors.bone} style={{ fontSize: 11 }}>APPROVE</AppText>
+                    </Pressable>
+                    <Pressable
+                      style={{ flex: 1, backgroundColor: '#f5f0eb', borderRadius: 6, paddingVertical: 10, alignItems: 'center', borderWidth: 1, borderColor: Colors.rule }}
+                      onPress={() => handleRejectProposal(pendingStartDateProposal.id)}
+                    >
+                      <AppText variant="mono" color={Colors.accent} style={{ fontSize: 11 }}>REJECT</AppText>
+                    </Pressable>
+                  </View>
+                ) : (
+                  <AppText variant="mono" color={Colors.muted} style={{ fontSize: 10, marginTop: 6 }}>
+                    Waiting for your partner to respond...
+                  </AppText>
+                )}
+              </View>
+            )}
           </View>
         )}
 
@@ -462,6 +556,41 @@ const UsSection: React.FC = () => {
                 </AppText>
               </Pressable>
             </View>
+
+            {/* Pending Reunion Proposal Banner */}
+            {pendingReunionProposal && (
+              <View style={{ backgroundColor: '#FFF3E0', borderRadius: 8, padding: 12, marginTop: 12, borderWidth: 1, borderColor: '#FFE0B2' }}>
+                <AppText variant="mono" color={Colors.ink2} style={{ fontSize: 10, marginBottom: 6 }}>
+                  {isPartnerProposal(pendingReunionProposal)
+                    ? "YOUR PARTNER PROPOSED A NEW REUNION DATE"
+                    : "AWAITING PARTNER APPROVAL"}
+                </AppText>
+                <AppText variant="serifItalic" size={15} color={Colors.ink}>
+                  Proposed: {formatReadableDate(pendingReunionProposal.payload?.date || "")}
+                  {pendingReunionProposal.payload?.city_name ? ` in ${pendingReunionProposal.payload.city_name}` : ""}
+                </AppText>
+                {isPartnerProposal(pendingReunionProposal) ? (
+                  <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
+                    <Pressable
+                      style={{ flex: 1, backgroundColor: Colors.ink, borderRadius: 6, paddingVertical: 10, alignItems: 'center' }}
+                      onPress={() => handleApproveProposal(pendingReunionProposal.id)}
+                    >
+                      <AppText variant="mono" color={Colors.bone} style={{ fontSize: 11 }}>APPROVE</AppText>
+                    </Pressable>
+                    <Pressable
+                      style={{ flex: 1, backgroundColor: '#f5f0eb', borderRadius: 6, paddingVertical: 10, alignItems: 'center', borderWidth: 1, borderColor: Colors.rule }}
+                      onPress={() => handleRejectProposal(pendingReunionProposal.id)}
+                    >
+                      <AppText variant="mono" color={Colors.accent} style={{ fontSize: 11 }}>REJECT</AppText>
+                    </Pressable>
+                  </View>
+                ) : (
+                  <AppText variant="mono" color={Colors.muted} style={{ fontSize: 10, marginTop: 6 }}>
+                    Waiting for your partner to respond...
+                  </AppText>
+                )}
+              </View>
+            )}
           </View>
         )}
       </View>
@@ -529,9 +658,9 @@ const UsSection: React.FC = () => {
             size="lg"
             style={{ marginTop: 20 }}
             onPress={handleSaveStartDate}
-            disabled={isSubmitting}
+            disabled={isSubmitting || !!pendingStartDateProposal}
           >
-            {isSubmitting ? "SAVING..." : "SAVE →"}
+            {isSubmitting ? "SENDING..." : pendingStartDateProposal ? "PROPOSAL PENDING..." : "PROPOSE CHANGE →"}
           </AppButton>
         </View>
       </BottomSheet>
@@ -707,9 +836,9 @@ const UsSection: React.FC = () => {
             size="lg"
             style={{ marginTop: 40 }}
             onPress={handleReunionSave}
-            disabled={isSubmitting || !reunionDateEdit}
+            disabled={isSubmitting || !reunionDateEdit || !!pendingReunionProposal}
           >
-            {isSubmitting ? "UPDATING..." : "UPDATE COUNTDOWN →"}
+            {isSubmitting ? "SENDING..." : pendingReunionProposal ? "PROPOSAL PENDING..." : "PROPOSE CHANGE →"}
           </AppButton>
         </View>
       </BottomSheet>

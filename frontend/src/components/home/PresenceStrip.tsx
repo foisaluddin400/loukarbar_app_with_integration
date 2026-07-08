@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, Pressable, ScrollView, Image } from 'react-native';
+import { View, StyleSheet, Pressable, ScrollView, Image, DeviceEventEmitter, Alert } from 'react-native';
 import { Colors } from '../../constants/colors';
 import { AppText } from '../ui/AppText';
 import { formatTime } from '../../utils/dateUtils';
@@ -14,12 +14,13 @@ import { AppButton } from '../ui/AppButton';
 import * as Clipboard from 'expo-clipboard';
 import { Ionicons } from '@expo/vector-icons';
 import { Swipeable } from 'react-native-gesture-handler';
-import { markNotificationSeen, markNotificationUnread, deleteNotification, hideNotification, unhideNotification } from '../../services/notificationApi';
+import { markNotificationSeen, markNotificationUnread, deleteNotification, hideNotification, unhideNotification, clearAllNotifications } from '../../services/notificationApi';
 export interface PresenceStripProps {
   onRedirect?: (type: string, data?: any) => void;
+  refreshTrigger?: number;
 }
 
-export const PresenceStrip: React.FC<PresenceStripProps> = ({ onRedirect }) => {
+export const PresenceStrip: React.FC<PresenceStripProps> = ({ onRedirect, refreshTrigger = 0 }) => {
   const rowRefs = React.useRef<{[key: string]: any}>({});
   const [showHidden, setShowHidden] = useState(false);
   const [now, setNow] = useState(new Date());
@@ -29,32 +30,6 @@ export const PresenceStrip: React.FC<PresenceStripProps> = ({ onRedirect }) => {
   const [isSheetOpen, setIsSheetOpen] = useState(false);
   const [inputKey, setInputKey] = useState("");
   const [isAligning, setIsAligning] = useState(false);
-  const [photoBlobUrl, setPhotoBlobUrl] = useState<string | null>(null);
-
-  useEffect(() => {
-    const fetchPartnerPhoto = async () => {
-      if (partner && partner.id && partner.profile_photo_url) {
-        try {
-          const t = await AsyncStorage.getItem('access_token');
-          if (t) {
-            const res = await fetch(`${api.defaults.baseURL}/users/photo/${partner.id}?t=${new Date().getTime()}`, {
-              headers: { Authorization: `Bearer ${t}` }
-            });
-            if (res.ok) {
-              const blob = await res.blob();
-              setPhotoBlobUrl(URL.createObjectURL(blob));
-            } else {
-              setPhotoBlobUrl(null);
-            }
-          }
-        } catch (e) {
-          console.log("Error fetching partner photo:", e);
-          setPhotoBlobUrl(null);
-        }
-      }
-    };
-    fetchPartnerPhoto();
-  }, [partner?.id, partner?.profile_photo_url]);
 
   const fetchPresenceData = async () => {
       try {
@@ -75,7 +50,7 @@ export const PresenceStrip: React.FC<PresenceStripProps> = ({ onRedirect }) => {
         }
 
         if (notificationsRes.success && notificationsRes.data) {
-          const presenceOnly = notificationsRes.data.filter((n: any) => n.type === 'Presence' || n.type === 'Partner Check-in' || n.type === 'Ritual Completed');
+          const presenceOnly = notificationsRes.data.filter((n: any) => n.type === 'Presence' || n.type === 'Partner Check-in' || n.type === 'Ritual Completed' || n.type === 'Proposal' || n.type === 'Reunion');
           setPresenceNotifications(presenceOnly);
         }
       } catch (e) {
@@ -86,13 +61,20 @@ export const PresenceStrip: React.FC<PresenceStripProps> = ({ onRedirect }) => {
   useEffect(() => {
     fetchPresenceData();
 
+    const sub = DeviceEventEmitter.addListener('OPEN_PRESENCE_HISTORY', () => {
+      setIsSheetOpen(true);
+    });
+
     const t = setInterval(() => {
       setNow(new Date());
       fetchPresenceData(); // Refresh every minute
     }, 60_000);
     
-    return () => clearInterval(t);
-  }, []);
+    return () => {
+      clearInterval(t);
+      sub.remove();
+    };
+  }, [refreshTrigger]);
 
   const handleAlign = async () => {
     if (!inputKey.trim()) return;
@@ -213,8 +195,8 @@ export const PresenceStrip: React.FC<PresenceStripProps> = ({ onRedirect }) => {
         <View style={styles.left}>
           <View style={styles.avatarWrap}>
             <View style={styles.avatar}>
-              {partner.profile_photo_url && photoBlobUrl ? (
-                <Image source={{ uri: photoBlobUrl }} style={{ width: '100%', height: '100%', borderRadius: 18 }} />
+              {partner.profile_photo_url ? (
+                <Image source={{ uri: `${api.defaults.baseURL}/${partner.profile_photo_url.replace(/\\/g, '/')}` }} style={{ width: '100%', height: '100%', borderRadius: 18 }} />
               ) : (
                 <AppText variant="mono" color={Colors.bone} style={{ fontSize: 13, fontWeight: '500' }}>
                   {partnerName[0].toUpperCase()}
@@ -256,10 +238,36 @@ export const PresenceStrip: React.FC<PresenceStripProps> = ({ onRedirect }) => {
         title={`${partnerName}'s Activity`}
         kicker="PRESENCE HISTORY"
       >
-        <View style={{ flexDirection: 'row', justifyContent: 'flex-end', paddingBottom: 10, paddingHorizontal: 20, marginTop: 10 }}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingBottom: 10, paddingHorizontal: 20, marginTop: 10 }}>
+          <Pressable onPress={() => {
+            Alert.alert(
+              "Clear All Notifications",
+              "Are you sure you want to permanently delete all notifications? This action cannot be undone.",
+              [
+                { text: "Cancel", style: "cancel" },
+                {
+                  text: "Clear All",
+                  style: "destructive",
+                  onPress: async () => {
+                    try {
+                      await clearAllNotifications();
+                      setPresenceNotifications([]);
+                      DeviceEventEmitter.emit('REFRESH_ALIGNED_DATA');
+                    } catch (e) {
+                      console.log("Error clearing notifications:", e);
+                    }
+                  }
+                }
+              ]
+            );
+          }}>
+            <AppText color={'#D9534F'} size={14} style={{ fontWeight: '600' }}>
+              Clear All
+            </AppText>
+          </Pressable>
           <Pressable onPress={() => setShowHidden(!showHidden)}>
             <AppText color={Colors.accent} size={14}>
-              {showHidden ? "Back to History" : "Hidden"}
+              {showHidden ? "Back to History" : "Archived"}
             </AppText>
           </Pressable>
         </View>
@@ -286,8 +294,8 @@ export const PresenceStrip: React.FC<PresenceStripProps> = ({ onRedirect }) => {
 
               const renderRightActions = () => (
                 <View style={{ justifyContent: 'center', height: '100%', flex: 1, alignItems: 'flex-end', paddingRight: 24 }}>
-                  <Ionicons name={isHidden ? "eye-outline" : "eye-off-outline"} size={20} color={Colors.accent} />
-                  <AppText color={Colors.accent} variant="mono" style={{ fontSize: 10, marginTop: 4, letterSpacing: 1 }}>{isHidden ? "UNHIDE" : "HIDE"}</AppText>
+                  <Ionicons name={isHidden ? "archive" : "archive-outline"} size={20} color={Colors.accent} />
+                  <AppText color={Colors.accent} variant="mono" style={{ fontSize: 10, marginTop: 4, letterSpacing: 1 }}>{isHidden ? "UNARCHIVE" : "ARCHIVE"}</AppText>
                 </View>
               );
 
@@ -305,6 +313,7 @@ export const PresenceStrip: React.FC<PresenceStripProps> = ({ onRedirect }) => {
                     onSwipeableLeftOpen={async () => {
                       await deleteNotification(n.id);
                       setPresenceNotifications(prev => prev.filter(x => x.id !== n.id));
+                      DeviceEventEmitter.emit('REFRESH_ALIGNED_DATA');
                       setTimeout(() => {
                         if (rowRefs.current[n.id]) {
                           rowRefs.current[n.id].close();
@@ -315,9 +324,11 @@ export const PresenceStrip: React.FC<PresenceStripProps> = ({ onRedirect }) => {
                       if (isHidden) {
                         await unhideNotification(n.id);
                         setPresenceNotifications(prev => prev.map(x => x.id === n.id ? { ...x, is_hidden: false } : x));
+                        DeviceEventEmitter.emit('REFRESH_ALIGNED_DATA');
                       } else {
                         await hideNotification(n.id);
                         setPresenceNotifications(prev => prev.map(x => x.id === n.id ? { ...x, is_hidden: true } : x));
+                        DeviceEventEmitter.emit('REFRESH_ALIGNED_DATA');
                       }
                       setTimeout(() => {
                         if (rowRefs.current[n.id]) {
@@ -340,6 +351,7 @@ export const PresenceStrip: React.FC<PresenceStripProps> = ({ onRedirect }) => {
                             if (index > -1) newList[index] = { ...newList[index], status: "Seen" };
                             return newList;
                           });
+                          DeviceEventEmitter.emit('REFRESH_ALIGNED_DATA');
                         }
                         if (n.type === 'Partner Check-in') {
                           setIsSheetOpen(false);

@@ -425,9 +425,9 @@ class RelationshipService:
         checkins_coll = self.db["check_ins"]
         messages_coll = self.db["thread_messages"]
         
-        # Dates for check_ins which uses string dates "YYYY-MM-DD"
+        # Dates for check_ins which uses string dates "MM.DD.YYYY"
         local_now = now.astimezone(tz)
-        dates_to_check = [(local_now - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(7)]
+        dates_to_check = [(local_now - timedelta(days=i)).strftime("%m.%d.%Y") for i in range(7)]
         
         def calculate_metric_sync(user_count: int, partner_count: int, max_per_user: int = 7) -> tuple[int, int, int]:
             # Cap the counts at the weekly max
@@ -455,8 +455,14 @@ class RelationshipService:
         r_perc, r_count, r_target = calculate_metric_sync(user_rituals, partner_rituals)
         
         # 2. Check-ins
-        user_checkins = await checkins_coll.count_documents({"user_id": user_id, "date": {"$in": dates_to_check}})
-        partner_checkins = await checkins_coll.count_documents({"user_id": partner_id, "date": {"$in": dates_to_check}}) if partner_id else 0
+        user_checkin_dates = await checkins_coll.distinct("date", {"user_id": user_id, "date": {"$in": dates_to_check}})
+        user_checkins = len(user_checkin_dates)
+        
+        partner_checkins = 0
+        if partner_id:
+            partner_checkin_dates = await checkins_coll.distinct("date", {"user_id": partner_id, "date": {"$in": dates_to_check}})
+            partner_checkins = len(partner_checkin_dates)
+            
         c_perc, c_count, c_target = calculate_metric_sync(user_checkins, partner_checkins)
         
         # 3. Appreciations (ritual_type="appreciation")

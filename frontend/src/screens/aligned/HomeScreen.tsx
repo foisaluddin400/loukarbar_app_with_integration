@@ -1,6 +1,7 @@
 import { SafeAreaView } from 'react-native-safe-area-context';
-import React, { useState, useCallback } from "react";
-import { View, ScrollView, StyleSheet, Pressable } from 'react-native';
+import React, { useState, useCallback, useEffect } from "react";
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { View, ScrollView, StyleSheet, Pressable, RefreshControl, DeviceEventEmitter } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Swipeable } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
@@ -25,6 +26,7 @@ import { getStreak } from "../../services/streakApi";
 import { completeRitual, getPartnerRituals, updateRitualVisibility } from "../../services/ritualApi";
 import { createCheckin, updateCheckin, getCheckin, getQuestionsEndpoint } from "../../services/checkinApi";
 import { getAlignedSyncSummary } from "../../services/userApi";
+import api from '../../services/api';
 
 import { getMoodList, getCurrentMood, logMood } from "../../services/moodApi";
 
@@ -72,6 +74,70 @@ export const HomeScreen: React.FC = () => {
     "TIME",
   );
   const [userName, setUserName] = useState<string>("User");
+  
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    setRefreshTrigger(prev => prev + 1);
+    setTimeout(() => setRefreshing(false), 1000);
+  }, []);
+
+  useEffect(() => {
+    let ws: WebSocket | null = null;
+    const connectWS = async () => {
+      try {
+        // Get user ID for the WebSocket endpoint
+        const meData = await getMe();
+        if (!meData || !meData.id) return;
+        
+        let wsUrl = api.defaults.baseURL?.replace("http://", "ws://").replace("https://", "wss://");
+        if (!wsUrl) return;
+        
+        wsUrl = `${wsUrl}/ws/notifications/${meData.id}`;
+        
+        ws = new WebSocket(wsUrl);
+        
+        ws.onopen = () => {
+          console.log("WebSocket connected for user:", meData.id);
+        };
+        
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.type === "NEW_NOTIFICATION") {
+              // Trigger a refresh across the components
+              setRefreshTrigger(prev => prev + 1);
+              DeviceEventEmitter.emit('REFRESH_ALIGNED_DATA');
+            }
+          } catch (e) {
+            console.log("Error parsing ws message", e);
+          }
+        };
+        
+        ws.onerror = (e) => {
+          console.log("WebSocket error:", e);
+        };
+        
+        ws.onclose = () => {
+          console.log("WebSocket disconnected, reconnecting in 5s...");
+          setTimeout(connectWS, 5000);
+        };
+      } catch (e) {
+        console.log("Error setting up WebSocket in HomeScreen:", e);
+      }
+    };
+    
+    connectWS();
+    
+    return () => {
+      if (ws) {
+        ws.onclose = null; // Prevent reconnect on intentional close
+        ws.close();
+      }
+    };
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
@@ -91,7 +157,7 @@ export const HomeScreen: React.FC = () => {
         }
       };
       fetchUser();
-    }, [])
+    }, [refreshTrigger])
   );
 
   const [activeUser] = useState<"lou" | "amanda">("lou");
@@ -230,7 +296,7 @@ export const HomeScreen: React.FC = () => {
       
       };
       loadData();
-    }, [])
+    }, [refreshTrigger])
   );
 
   const handleAppreciationSubmit = async () => {
@@ -332,7 +398,12 @@ export const HomeScreen: React.FC = () => {
   return (
     <SafeAreaView style={styles.safe}>
       <AlignedNav></AlignedNav>
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.accent} />
+        }
+      >
         <PresenceStrip 
           onRedirect={(type, partnerData) => {
             if (partnerData) {
@@ -345,6 +416,7 @@ export const HomeScreen: React.FC = () => {
               setSheet("partner_ritual_history");
             }
           }}
+          refreshTrigger={refreshTrigger}
         />
 
         <View style={styles.inner}>
@@ -459,9 +531,9 @@ export const HomeScreen: React.FC = () => {
             </View>
           </View>
 
-          <UsSection />
+          <UsSection refreshTrigger={refreshTrigger} />
 
-          <OurPlaylist></OurPlaylist>
+          {/* <OurPlaylist></OurPlaylist> */}
 
           {/* Desire Mood */}
           <AppText
@@ -911,7 +983,7 @@ export const HomeScreen: React.FC = () => {
               </AppText>
             </View>
 
-            {/* Weekly check-in */}
+            {/* Daily check-in */}
             <View
               style={{
                 backgroundColor: "#EAE2D4",
@@ -928,7 +1000,7 @@ export const HomeScreen: React.FC = () => {
                 }}
               >
                 <AppText variant="heading" size={17}>
-                  Weekly check-in
+                  Daily check-in
                 </AppText>
                 <AppText variant="mono" color={Colors.muted} size={15}>
                   {syncData ? syncData.checkins.percentage : 28}%
