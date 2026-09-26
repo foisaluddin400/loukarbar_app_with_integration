@@ -1,0 +1,35 @@
+{
+  "cli": {
+    "version": ">= 16.28.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal"
+    },
+    "preview": {
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_BACKEND_URL": "https://16-170-226-19.sslip.io",
+        "EXPO_PUBLIC_ONESIGNAL_APP_ID": "2fb64fca-532b-4307-ada8-f28aee0684e3"
+      },
+      "android": {
+        "buildType": "apk"
+      }
+    },
+    "production": {
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_BACKEND_URL": "https://16-170-226-19.sslip.io",
+        "EXPO_PUBLIC_ONESIGNAL_APP_ID": "2fb64fca-532b-4307-ada8-f28aee0684e3"
+      },
+      "android": {
+        "buildType": "app-bundle"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}

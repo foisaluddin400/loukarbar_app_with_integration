@@ -1,0 +1,74 @@
+{
+  "expo": {
+    "name": "aligned",
+    "slug": "aligned-rn",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "backgroundColor": "#F4EEE4"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.foisaldev.alignedrn",
+      "config": {
+        "usesNonExemptEncryption": false
+      },
+      "infoPlist": {
+        "NSCameraUsageDescription": "Allow Aligned to access your camera to scan alignment QR codes.",
+        "NSPhotoLibraryUsageDescription": "Allow Aligned to access your photo library for profile photos and shared memories.",
+        "NSMicrophoneUsageDescription": "Allow Aligned to access your microphone for voice notes.",
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#F4EEE4"
+      },
+      "package": "com.foisaldev.alignedrn",
+      "permissions": [
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.ACCESS_WIFI_STATE",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_VIDEO",
+        "android.permission.READ_MEDIA_AUDIO",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
+      ]
+    },
+    "plugins": [
+      "expo-font",
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Allow Aligned to save photos to your device.",
+          "savePhotosPermission": "Allow Aligned to save photos to your device.",
+          "isAccessMediaLocationEnabled": false
+        }
+      ],
+      [
+        "onesignal-expo-plugin",
+        {
+          "mode": "development"
+        }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Allow Aligned to access your microphone for voice notes."
+        }
+      ],
+      "expo-video"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "bbb297ac-7138-4d0c-a127-b62cecd20885"
+      }
+    }
+  }
+}
